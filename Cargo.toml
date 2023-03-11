@@ -1,8 +1,8 @@
 [package]
-name = "rlisp"
+name = "lambda"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+rustyline = "11.0.0" ## Repl support.
+thiserror = "1.0.39" ## Error handling.
