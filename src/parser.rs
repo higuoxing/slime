@@ -10,7 +10,6 @@ pub enum ParseError {
 
 #[derive(Debug, PartialEq)]
 enum TokenKind {
-    None,       // None,
     LeftParen,  // '('
     RightParen, // ')'
     Dot,        // '.'
@@ -52,18 +51,33 @@ struct Lexer<'a> {
     tokens: Vec<Token<'a>>,
 }
 
-impl<'a> Lexer<'a> {
-    fn is_symbol(ch: char) -> bool {
-        if ch < '!' || ch > 'z' {
-            return false;
-        }
-
-        match ch {
-            '(' | ')' | '#' | ';' => false,
-            _ => true,
-        }
+fn is_symbol(ch: char) -> bool {
+    if ch < '!' || ch > 'z' {
+        return false;
     }
 
+    match ch {
+        '(' | ')' | '#' | ';' => false,
+        _ => true,
+    }
+}
+
+// See the chapter of 'Character Sets' in
+//   https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
+fn is_print(ch: char) -> bool {
+    match ch {
+        '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | '-' | '.'
+        | '/' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | ':' | ';' | '<'
+        | '=' | '>' | '?' | '@' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'
+        | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X'
+        | 'Y' | 'Z' | '[' | '\\' | ']' | '^' | '_' | '`' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
+        | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+        | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '{' | '|' | '}' | '~' => true,
+        _ => false,
+    }
+}
+
+impl<'a> Lexer<'a> {
     fn tokenize(program: &'a str) -> Result<Vec<Token>, ParseError> {
         let mut tokens = vec![];
         let mut program_char_indices = program.char_indices();
@@ -175,6 +189,51 @@ impl<'a> Lexer<'a> {
                                 TokenKind::Bool,
                             ));
                             line_offset += "#t".len() as i64;
+                        } else if ch == '\\' {
+                            // Char type.
+                            let mut charlen = "#\\".len();
+
+                            if let Some((_, ch)) = program_char_indices.next() {
+                                if ch.is_alphanumeric() {
+                                    charlen += ch.len_utf8();
+
+                                    let mut prev_program_char_indices =
+                                        program_char_indices.clone();
+
+                                    while let Some((_, ch)) = program_char_indices.next() {
+                                        if ch.is_alphanumeric() {
+                                            charlen += ch.len_utf8();
+                                            prev_program_char_indices =
+                                                program_char_indices.clone();
+                                            continue;
+                                        } else {
+                                            // Put back one character.
+                                            program_char_indices =
+                                                prev_program_char_indices.clone();
+                                            break;
+                                        }
+                                    }
+
+                                    tokens.push(Token::new(
+                                        &program[start..start + charlen],
+                                        line_number,
+                                        line_offset,
+                                        TokenKind::Char,
+                                    ));
+                                    line_offset += charlen as i64;
+                                } else if is_print(ch) {
+                                    charlen += ch.len_utf8();
+                                    tokens.push(Token::new(
+                                        &program[start..start + charlen],
+                                        line_number,
+                                        line_offset,
+                                        TokenKind::Char,
+                                    ));
+                                    line_offset += charlen as i64;
+                                }
+                            } else {
+                                return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                            }
                         }
                     } else {
                         return Err(ParseError::UnexpectedToken(line_number, line_offset));
@@ -253,13 +312,13 @@ impl<'a> Lexer<'a> {
                     } else {
                         // Try to parse it as a symbol.
                         let mut symbol_len = ch.len_utf8();
-                        if !Self::is_symbol(ch) {
+                        if !is_symbol(ch) {
                             return Err(ParseError::UnexpectedToken(line_number, line_offset));
                         }
 
                         let mut prev_program_char_indices = program_char_indices.clone();
                         while let Some((_, ch)) = program_char_indices.next() {
-                            if Self::is_symbol(ch) {
+                            if is_symbol(ch) {
                                 prev_program_char_indices = program_char_indices.clone();
                                 symbol_len += ch.len_utf8();
                                 continue;
@@ -302,7 +361,7 @@ mod test {
     #[test]
     fn test_tokenizer() {
         let program = String::from(
-            "( (  ) ) . \n, @ #f #t #(\n\n  \" some string\" #(  3.1415926   (()) 3333  (()) some_symbol\nsome_symbol2  (())\n`",
+            "( (  ) ) . \n, @ #f #t #(\n\n  \" some string\" #(  3.1415926   (()) 3333  (()) some_symbol\nsome_symbol2  (())\n`;; this is comment\nfoo\n#\\newline (())",
         );
         assert_eq!(
             Lexer::tokenize(program.as_str()),
@@ -335,7 +394,25 @@ mod test {
                 Token::new("(", 5, 16, TokenKind::LeftParen),
                 Token::new(")", 5, 17, TokenKind::RightParen),
                 Token::new(")", 5, 18, TokenKind::RightParen),
-                Token::new("`", 6, 1, TokenKind::BackQuote)
+                Token::new("`", 6, 1, TokenKind::BackQuote),
+                Token::new("foo", 7, 1, TokenKind::Symbol),
+                Token::new("#\\newline", 8, 1, TokenKind::Char),
+                Token::new("(", 8, 11, TokenKind::LeftParen),
+                Token::new("(", 8, 12, TokenKind::LeftParen),
+                Token::new(")", 8, 13, TokenKind::RightParen),
+                Token::new(")", 8, 14, TokenKind::RightParen),
+            ])
+        );
+
+        let program = String::from("(+  1 2)");
+        assert_eq!(
+            Lexer::tokenize(program.as_str()),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("+", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 5, TokenKind::Int),
+                Token::new("2", 1, 7, TokenKind::Int),
+                Token::new(")", 1, 8, TokenKind::RightParen)
             ])
         );
     }
