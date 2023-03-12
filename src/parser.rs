@@ -1,3 +1,5 @@
+use std::str::CharIndices;
+
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
@@ -30,16 +32,16 @@ enum TokenKind {
 struct Token<'a> {
     literal: &'a str,
     line_number: i64,
-    char_offset: i64,
+    line_offset: i64,
     kind: TokenKind,
 }
 
 impl<'a> Token<'a> {
-    fn new(literal: &'a str, line_number: i64, char_offset: i64, kind: TokenKind) -> Self {
+    fn new(literal: &'a str, line_number: i64, line_offset: i64, kind: TokenKind) -> Self {
         Self {
             literal,
             line_number,
-            char_offset,
+            line_offset,
             kind,
         }
     }
@@ -51,33 +53,154 @@ struct Lexer<'a> {
     tokens: Vec<Token<'a>>,
 }
 
-fn is_symbol(ch: char) -> bool {
-    if ch < '!' || ch > 'z' {
-        return false;
-    }
-
-    match ch {
-        '(' | ')' | '#' | ';' => false,
-        _ => true,
-    }
-}
-
-// See the chapter of 'Character Sets' in
-//   https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
-fn is_print(ch: char) -> bool {
-    match ch {
-        '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | '-' | '.'
-        | '/' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | ':' | ';' | '<'
-        | '=' | '>' | '?' | '@' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'
-        | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X'
-        | 'Y' | 'Z' | '[' | '\\' | ']' | '^' | '_' | '`' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
-        | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
-        | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '{' | '|' | '}' | '~' => true,
-        _ => false,
-    }
-}
-
+// FIXME: Try to make the lexer into an iterator.
 impl<'a> Lexer<'a> {
+    fn try_match_string_literal(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), ParseError> {
+        let mut strlen = "\"".len();
+        while let Some((_, ch)) = program_char_indices.next() {
+            strlen += ch.len_utf8();
+            if ch == '"' {
+                break;
+            }
+        }
+        Ok((
+            Token::new(
+                &program[start..start + strlen],
+                line_number,
+                line_offset,
+                TokenKind::String,
+            ),
+            strlen as i64,
+        ))
+    }
+
+    fn try_match_number(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        mut curr_char: char,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), ParseError> {
+        let mut digit_len = 0;
+        let mut is_float = false;
+        let prev_program_char_indices = program_char_indices.clone();
+
+        if curr_char == '+' || curr_char == '-' {
+            digit_len += curr_char.len_utf8();
+
+            // Look one character ahead.
+            if let Some((_, ch)) = program_char_indices.next() {
+                curr_char = ch;
+            } else {
+                // No more characters, put one character back.
+                *program_char_indices = prev_program_char_indices.clone();
+                return Err(ParseError::Unknown);
+            }
+        }
+
+        if curr_char.is_digit(10) {
+            // Try to parse it as number.
+            digit_len += curr_char.len_utf8();
+            let mut prev_program_char_indices = program_char_indices.clone();
+            while let Some((_, ch)) = program_char_indices.next() {
+                if ch.is_digit(10) {
+                    digit_len += ch.len_utf8();
+                    prev_program_char_indices = program_char_indices.clone();
+                    continue;
+                } else {
+                    // Put back one character.
+                    *program_char_indices = prev_program_char_indices.clone();
+                    break;
+                }
+            }
+
+            // Is this a float number?
+            prev_program_char_indices = program_char_indices.clone();
+            if let Some((_, ch)) = program_char_indices.next() {
+                if ch == '.' {
+                    digit_len += ch.len_utf8();
+                    is_float = true;
+
+                    while let Some((_, ch)) = program_char_indices.next() {
+                        if ch.is_digit(10) {
+                            digit_len += ch.len_utf8();
+                            prev_program_char_indices = program_char_indices.clone();
+                            continue;
+                        } else {
+                            // Put back one character.
+                            *program_char_indices = prev_program_char_indices.clone();
+                            break;
+                        }
+                    }
+                } else {
+                    // Put back one character.
+                    *program_char_indices = prev_program_char_indices.clone();
+                }
+            }
+
+            Ok((
+                Token::new(
+                    &program[start..start + digit_len],
+                    line_number,
+                    line_offset,
+                    if is_float {
+                        TokenKind::Float
+                    } else {
+                        TokenKind::Int
+                    },
+                ),
+                digit_len as i64,
+            ))
+        } else {
+            // Put back one character.
+            *program_char_indices = prev_program_char_indices.clone();
+            Err(ParseError::Unknown)
+        }
+    }
+
+    fn try_match_symbol(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        curr_char: char,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), ParseError> {
+        let mut symbol_len = curr_char.len_utf8();
+        if !is_symbol(curr_char) {
+            return Err(ParseError::UnexpectedToken(line_number, line_offset));
+        }
+
+        let mut prev_program_char_indices = program_char_indices.clone();
+        while let Some((_, ch)) = program_char_indices.next() {
+            if is_symbol(ch) {
+                prev_program_char_indices = program_char_indices.clone();
+                symbol_len += ch.len_utf8();
+                continue;
+            } else {
+                *program_char_indices = prev_program_char_indices.clone();
+                break;
+            }
+        }
+
+        Ok((
+            Token::new(
+                &program[start..start + symbol_len],
+                line_number,
+                line_offset,
+                TokenKind::Symbol,
+            ),
+            symbol_len as i64,
+        ))
+    }
+
     fn tokenize(program: &'a str) -> Result<Vec<Token>, ParseError> {
         let mut tokens = vec![];
         let mut program_char_indices = program.char_indices();
@@ -241,100 +364,48 @@ impl<'a> Lexer<'a> {
                 }
                 '"' => {
                     // Process string literal.
-                    let mut strlen = "\"".len();
-                    while let Some((_, ch)) = program_char_indices.next() {
-                        strlen += ch.len_utf8();
-                        if ch == '"' {
-                            break;
-                        }
-                    }
-                    tokens.push(Token::new(
-                        &program[start..start + strlen],
+                    if let Ok((token, token_len)) = Self::try_match_string_literal(
+                        program,
+                        start,
                         line_number,
                         line_offset,
-                        TokenKind::String,
-                    ));
-                    line_offset += strlen as i64;
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else {
+                        // Unlikely to happen.
+                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                    }
                 }
                 _ => {
-                    if ch.is_digit(10) {
-                        // Try to parse it as number.
-                        let mut digit_len = ch.len_utf8();
-                        let mut is_float = false;
-                        let mut prev_program_char_indices = program_char_indices.clone();
-                        while let Some((_, ch)) = program_char_indices.next() {
-                            if ch.is_digit(10) {
-                                digit_len += ch.len_utf8();
-                                prev_program_char_indices = program_char_indices.clone();
-                                continue;
-                            } else {
-                                // Put back one character.
-                                program_char_indices = prev_program_char_indices.clone();
-                                break;
-                            }
-                        }
-
-                        // Is this a float number?
-                        prev_program_char_indices = program_char_indices.clone();
-                        if let Some((_, ch)) = program_char_indices.next() {
-                            if ch == '.' {
-                                digit_len += ch.len_utf8();
-                                is_float = true;
-
-                                while let Some((_, ch)) = program_char_indices.next() {
-                                    if ch.is_digit(10) {
-                                        digit_len += ch.len_utf8();
-                                        prev_program_char_indices = program_char_indices.clone();
-                                        continue;
-                                    } else {
-                                        // Put back one character.
-                                        program_char_indices = prev_program_char_indices.clone();
-                                        break;
-                                    }
-                                }
-                            } else {
-                                // Put back one character.
-                                program_char_indices = prev_program_char_indices.clone();
-                            }
-                        }
-
-                        tokens.push(Token::new(
-                            &program[start..start + digit_len],
-                            line_number,
-                            line_offset,
-                            if is_float {
-                                TokenKind::Float
-                            } else {
-                                TokenKind::Int
-                            },
-                        ));
-                        line_offset += digit_len as i64;
-                    } else {
+                    if let Ok((token, token_len)) = Self::try_match_number(
+                        // Try to parse it as a number.
+                        program,
+                        start,
+                        line_number,
+                        line_offset,
+                        ch,
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else if let Ok((token, token_len)) = Self::try_match_symbol(
                         // Try to parse it as a symbol.
-                        let mut symbol_len = ch.len_utf8();
-                        if !is_symbol(ch) {
-                            return Err(ParseError::UnexpectedToken(line_number, line_offset));
-                        }
-
-                        let mut prev_program_char_indices = program_char_indices.clone();
-                        while let Some((_, ch)) = program_char_indices.next() {
-                            if is_symbol(ch) {
-                                prev_program_char_indices = program_char_indices.clone();
-                                symbol_len += ch.len_utf8();
-                                continue;
-                            } else {
-                                program_char_indices = prev_program_char_indices.clone();
-                                break;
-                            }
-                        }
-
-                        tokens.push(Token::new(
-                            &program[start..start + symbol_len],
-                            line_number,
-                            line_offset,
-                            TokenKind::Symbol,
-                        ));
-                        line_offset += symbol_len as i64;
+                        program,
+                        start,
+                        line_number,
+                        line_offset,
+                        ch,
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else {
+                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
                     }
                 }
             }
@@ -343,23 +414,108 @@ impl<'a> Lexer<'a> {
         Ok(tokens)
     }
 
+    fn tokens(&self) -> &Vec<Token> {
+        self.tokens.as_ref()
+    }
+
     fn new(program: &'a str) -> Result<Lexer<'a>, ParseError> {
         let tokens = Self::tokenize(program)?;
         Ok(Self { program, tokens })
     }
 }
 
-#[derive(Debug)]
-struct Parser {}
+#[derive(Debug, PartialEq)]
+enum Object {
+    Nil,
+    Real(f64),
+    Int(i64),
+}
 
-impl Parser {}
+#[derive(Debug)]
+struct Parser<'a> {
+    lexer: Lexer<'a>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(program: &'a str) -> Result<Self, ParseError> {
+        Ok(Self {
+            lexer: Lexer::new(program)?,
+        })
+    }
+
+    fn parse_number(curr_token: &Token) -> Result<Object, ParseError> {
+        match curr_token.kind {
+            TokenKind::Int => {
+                if let Ok(n) = curr_token.literal.parse::<i64>() {
+                    Ok(Object::Int(n))
+                } else {
+                    Err(ParseError::UnexpectedToken(
+                        curr_token.line_number,
+                        curr_token.line_offset,
+                    ))
+                }
+            }
+            TokenKind::Float => {
+                if let Ok(f) = curr_token.literal.parse::<f64>() {
+                    Ok(Object::Real(f))
+                } else {
+                    Err(ParseError::UnexpectedToken(
+                        curr_token.line_number,
+                        curr_token.line_offset,
+                    ))
+                }
+            }
+            _ => Err(ParseError::UnexpectedToken(
+                curr_token.line_number,
+                curr_token.line_offset,
+            )),
+        }
+    }
+
+    fn parse(&self) -> Result<Object, ParseError> {
+        if self.lexer.tokens.is_empty() {
+            return Ok(Object::Nil);
+        }
+
+        let mut token_iter = self.lexer.tokens.iter();
+
+        Err(ParseError::Unknown)
+    }
+}
+
+fn is_symbol(ch: char) -> bool {
+    if ch < '!' || ch > 'z' {
+        return false;
+    }
+
+    match ch {
+        '(' | ')' | '#' | ';' => false,
+        _ => true,
+    }
+}
+
+// See the chapter of 'Character Sets' in
+//   https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
+fn is_print(ch: char) -> bool {
+    match ch {
+        '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | '-' | '.'
+        | '/' | '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | ':' | ';' | '<'
+        | '=' | '>' | '?' | '@' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J'
+        | 'K' | 'L' | 'M' | 'N' | 'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X'
+        | 'Y' | 'Z' | '[' | '\\' | ']' | '^' | '_' | '`' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
+        | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't'
+        | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '{' | '|' | '}' | '~' => true,
+        _ => false,
+    }
+}
 
 #[cfg(test)]
 mod test {
-    use crate::parser::{Lexer, Token, TokenKind};
+    use crate::parser::{Lexer, Object, Parser, Token, TokenKind};
 
     #[test]
     fn test_tokenizer() {
+        // Test tokenize various symbols.
         let program = String::from(
             "( (  ) ) . \n, @ #f #t #(\n\n  \" some string\" #(  3.1415926   (()) 3333  (()) some_symbol\nsome_symbol2  (())\n`;; this is comment\nfoo\n#\\newline (())",
         );
@@ -415,5 +571,44 @@ mod test {
                 Token::new(")", 1, 8, TokenKind::RightParen)
             ])
         );
+
+        let program = String::from("(- 1 -99999)");
+        assert_eq!(
+            Lexer::tokenize(program.as_str()),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new("-99999", 1, 6, TokenKind::Int),
+                Token::new(")", 1, 12, TokenKind::RightParen)
+            ])
+        );
+
+        let program = String::from("(- 1 -999.99)");
+        assert_eq!(
+            Lexer::tokenize(program.as_str()),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new("-999.99", 1, 6, TokenKind::Float),
+                Token::new(")", 1, 13, TokenKind::RightParen)
+            ])
+        );
+    }
+
+    #[test]
+    fn test_parser() {
+        let token = Token::new("1.1", 1, 1, TokenKind::Float);
+        assert_eq!(Parser::parse_number(&token), Ok(Object::Real(1.1)));
+
+        let token = Token::new("-1.1", 1, 1, TokenKind::Float);
+        assert_eq!(Parser::parse_number(&token), Ok(Object::Real(-1.1)));
+
+        let token = Token::new("1", 1, 1, TokenKind::Int);
+        assert_eq!(Parser::parse_number(&token), Ok(Object::Int(1)));
+
+        let token = Token::new("-99999", 1, 1, TokenKind::Int);
+        assert_eq!(Parser::parse_number(&token), Ok(Object::Int(-99999)));
     }
 }
