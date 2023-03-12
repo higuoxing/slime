@@ -22,13 +22,13 @@ enum Object {
 
 #[derive(Debug)]
 struct Parser<'a> {
-    lexer: Tokenizer<'a>,
+    tokenizer: Tokenizer<'a>,
 }
 
 impl<'a> Parser<'a> {
     fn new(program: &'a str) -> Result<Self, ParseError> {
         Ok(Self {
-            lexer: Tokenizer::new(program)?,
+            tokenizer: Tokenizer::new(program)?,
         })
     }
 
@@ -81,11 +81,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse(&self) -> Result<Object, ParseError> {
-        if self.lexer.tokens().is_empty() {
+        if self.tokenizer.tokens().is_empty() {
             return Ok(Object::Nil);
         }
 
-        let mut token_iter = self.lexer.tokens().iter();
+        let mut token_iter = self.tokenizer.tokens().iter();
 
         Err(ParseError::Unknown)
     }
