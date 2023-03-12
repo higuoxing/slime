@@ -60,13 +60,24 @@ impl<'a> Lexer<'a> {
         start: usize,
         line_number: i64,
         line_offset: i64,
+        curr_char: char,
         program_char_indices: &mut CharIndices,
     ) -> Result<(Token<'a>, i64), ParseError> {
-        let mut strlen = "\"".len();
+        let mut strlen = curr_char.len_utf8();
         while let Some((_, ch)) = program_char_indices.next() {
             strlen += ch.len_utf8();
-            if ch == '"' {
-                break;
+            match ch {
+                '\\' => {
+                    // Look a character ahead.
+                    if let Some((_, ch)) = program_char_indices.next() {
+                        strlen += ch.len_utf8();
+                        continue;
+                    } else {
+                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                    }
+                }
+                '"' => break,
+                _ => continue,
             }
         }
         Ok((
@@ -369,6 +380,7 @@ impl<'a> Lexer<'a> {
                         start,
                         line_number,
                         line_offset,
+                        ch,
                         &mut program_char_indices,
                     ) {
                         tokens.push(token);
@@ -593,6 +605,23 @@ mod test {
                 Token::new("1", 1, 4, TokenKind::Int),
                 Token::new("-999.99", 1, 6, TokenKind::Float),
                 Token::new(")", 1, 13, TokenKind::RightParen)
+            ])
+        );
+
+        let program = String::from("(- 1 \"string with escape character\\n\")");
+        assert_eq!(
+            Lexer::tokenize(program.as_str()),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new(
+                    "\"string with escape character\\n\"",
+                    1,
+                    6,
+                    TokenKind::String
+                ),
+                Token::new(")", 1, 38, TokenKind::RightParen)
             ])
         );
     }
