@@ -20,11 +20,11 @@ pub enum TokenKind {
     HashLeftParen, // '#('
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Token<'a> {
     literal: &'a str,
-    line_number: i64,
-    line_offset: i64,
+    line: i64,
+    column: i64,
     kind: TokenKind,
 }
 
@@ -32,18 +32,18 @@ impl<'a> Token<'a> {
     pub fn new(literal: &'a str, line_number: i64, line_offset: i64, kind: TokenKind) -> Self {
         Self {
             literal,
-            line_number,
-            line_offset,
+            line: line_number,
+            column: line_offset,
             kind,
         }
     }
 
-    pub fn line_number(&self) -> i64 {
-        self.line_number
+    pub fn line(&self) -> i64 {
+        self.line
     }
 
-    pub fn line_offset(&self) -> i64 {
-        self.line_offset
+    pub fn column(&self) -> i64 {
+        self.column
     }
 
     pub fn kind(&self) -> TokenKind {
