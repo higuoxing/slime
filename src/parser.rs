@@ -128,29 +128,37 @@ impl<'a> Parser<'a> {
                     curr_token = self.tokenizer.tokens()[*token_cursor];
                 }
 
-                // TODO:
-                // if curr_token.kind() == TokenKind::Dot {
-                //     // Advance the cursor.
-                //     *token_cursor += 1;
-                //     if *token_cursor >= token_len {
-                //         return Err(ParseError::UnexpectedToken(
-                //             curr_token.line(),
-                //             curr_token.column(),
-                //         ));
-                //     }
-                //     curr_token = self.tokenizer.tokens()[*token_cursor];
-                //
-                //     if curr_token.kind() != TokenKind::RightParen {
-                //         if let Ok(object) = self.parse_list(token_cursor) {
-                //             list.push_back(object);
-                //         } else {
-                //             return Err(ParseError::UnexpectedToken(
-                //                 curr_token.line(),
-                //                 curr_token.column(),
-                //             ));
-                //         }
-                //     }
-                // }
+                if curr_token.kind() == TokenKind::Dot {
+                    // Advance the cursor.
+                    *token_cursor += 1;
+                    if *token_cursor >= token_len {
+                        return Err(ParseError::UnexpectedToken(
+                            curr_token.line(),
+                            curr_token.column(),
+                        ));
+                    }
+
+                    curr_token = self.tokenizer.tokens()[*token_cursor];
+
+                    if curr_token.kind() != TokenKind::RightParen {
+                        match self.parse_object_recursive(token_cursor) {
+                            Ok(object) => {
+                                list.push_back(object);
+
+                                // The cursor is incremented in parse_object_recursive(), we should
+                                // check the bound and update the curr_token.
+                                if *token_cursor >= token_len {
+                                    return Err(ParseError::UnexpectedToken(
+                                        curr_token.line(),
+                                        curr_token.column(),
+                                    ));
+                                }
+                                curr_token = self.tokenizer.tokens()[*token_cursor];
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
 
                 if curr_token.kind() != TokenKind::RightParen {
                     return Err(ParseError::UnexpectedToken(
@@ -272,6 +280,23 @@ mod tests {
         );
 
         let parser = Parser::new("(#f (-2.5 3))").unwrap();
+        assert_eq!(
+            parser.parse().unwrap(),
+            Object::List(
+                vec![
+                    Object::Bool(false),
+                    Object::List(
+                        vec![Object::Real(-2.5), Object::Int(3)]
+                            .into_iter()
+                            .collect()
+                    )
+                ]
+                .into_iter()
+                .collect()
+            )
+        );
+
+        let parser = Parser::new("(#f . (-2.5 . 3))").unwrap();
         assert_eq!(
             parser.parse().unwrap(),
             Object::List(
