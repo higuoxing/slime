@@ -1,4 +1,4 @@
-use crate::parser::ParseError;
+use crate::error::Errors;
 
 use std::str::CharIndices;
 
@@ -70,7 +70,7 @@ impl<'a> Tokenizer<'a> {
         line_offset: i64,
         curr_char: char,
         program_char_indices: &mut CharIndices,
-    ) -> Result<(Token<'a>, i64), ParseError> {
+    ) -> Result<(Token<'a>, i64), Errors> {
         let mut strlen = curr_char.len_utf8();
         while let Some((_, ch)) = program_char_indices.next() {
             strlen += ch.len_utf8();
@@ -81,7 +81,7 @@ impl<'a> Tokenizer<'a> {
                         strlen += ch.len_utf8();
                         continue;
                     } else {
-                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
                     }
                 }
                 '"' => break,
@@ -106,7 +106,7 @@ impl<'a> Tokenizer<'a> {
         line_offset: i64,
         mut curr_char: char,
         program_char_indices: &mut CharIndices,
-    ) -> Result<(Token<'a>, i64), ParseError> {
+    ) -> Result<(Token<'a>, i64), Errors> {
         let mut digit_len = 0;
         let mut is_float = false;
         let prev_program_char_indices = program_char_indices.clone();
@@ -120,7 +120,7 @@ impl<'a> Tokenizer<'a> {
             } else {
                 // No more characters, put one character back.
                 *program_char_indices = prev_program_char_indices.clone();
-                return Err(ParseError::Unknown);
+                return Err(Errors::Unknown);
             }
         }
 
@@ -180,7 +180,7 @@ impl<'a> Tokenizer<'a> {
         } else {
             // Put back one character.
             *program_char_indices = prev_program_char_indices.clone();
-            Err(ParseError::Unknown)
+            Err(Errors::Unknown)
         }
     }
 
@@ -191,10 +191,10 @@ impl<'a> Tokenizer<'a> {
         line_offset: i64,
         curr_char: char,
         program_char_indices: &mut CharIndices,
-    ) -> Result<(Token<'a>, i64), ParseError> {
+    ) -> Result<(Token<'a>, i64), Errors> {
         let mut symbol_len = curr_char.len_utf8();
         if !is_symbol(curr_char) {
-            return Err(ParseError::UnexpectedToken(line_number, line_offset));
+            return Err(Errors::UnexpectedToken(line_number, line_offset));
         }
 
         let mut prev_program_char_indices = program_char_indices.clone();
@@ -220,7 +220,7 @@ impl<'a> Tokenizer<'a> {
         ))
     }
 
-    pub fn tokenize(program: &'a str) -> Result<Vec<Token>, ParseError> {
+    pub fn tokenize(program: &'a str) -> Result<Vec<Token>, Errors> {
         let mut tokens = vec![];
         let mut program_char_indices = program.char_indices();
         let mut line_number: i64 = 1;
@@ -374,11 +374,11 @@ impl<'a> Tokenizer<'a> {
                                     line_offset += charlen as i64;
                                 }
                             } else {
-                                return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                                return Err(Errors::UnexpectedToken(line_number, line_offset));
                             }
                         }
                     } else {
-                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
                     }
                 }
                 '"' => {
@@ -425,7 +425,7 @@ impl<'a> Tokenizer<'a> {
                         line_offset += token_len;
                         continue;
                     } else {
-                        return Err(ParseError::UnexpectedToken(line_number, line_offset));
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
                     }
                 }
             }
@@ -438,7 +438,7 @@ impl<'a> Tokenizer<'a> {
         self.tokens.as_ref()
     }
 
-    pub fn new(program: &'a str) -> Result<Tokenizer<'a>, ParseError> {
+    pub fn new(program: &'a str) -> Result<Tokenizer<'a>, Errors> {
         let tokens = Self::tokenize(program)?;
         Ok(Self { program, tokens })
     }
