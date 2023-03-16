@@ -344,5 +344,7 @@ mod tests {
                 ))
             )
         );
+
+        assert_eq!(parse_program("()").unwrap(), Object::Nil);
     }
 }
