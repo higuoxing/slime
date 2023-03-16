@@ -7,5 +7,5 @@ pub enum Object {
     Int(i64),
     Bool(bool),
     Symbol(String),
-    List(LinkedList<Object>),
+    Cons(Box<Object>, Box<Object>),
 }

@@ -1,7 +1,6 @@
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
-use std::collections::LinkedList;
 
 fn parse_bool<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
     let curr_token = tokens[*token_cursor];
@@ -74,6 +73,20 @@ fn parse_symbol<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result
     }
 }
 
+fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
+    while let Object::Cons(car, cdr) = list {
+        let next = *cdr;
+        list = Object::Cons(car, Box::new(tail));
+        tail = list;
+        list = next;
+    }
+    tail
+}
+
+fn reverse_list(mut list: Object) -> Object {
+    reverse_list_with_tail(list, Object::Nil)
+}
+
 fn parse_object_recursive<'a>(
     tokens: &Vec<Token<'a>>,
     token_cursor: &mut usize,
@@ -89,7 +102,7 @@ fn parse_object_recursive<'a>(
             ))
         }
         TokenKind::LeftParen => {
-            let mut list = LinkedList::new();
+            let mut tail = Object::Nil;
 
             // Advance the cursor of token, eat '('.
             *token_cursor += 1;
@@ -106,7 +119,7 @@ fn parse_object_recursive<'a>(
                 && curr_token.kind() != TokenKind::Dot
             {
                 if let Ok(object) = parse_object_recursive(tokens, token_cursor) {
-                    list.push_back(object);
+                    tail = Object::Cons(Box::new(object), Box::new(tail));
                 } else {
                     return Err(Errors::UnexpectedToken(
                         curr_token.line(),
@@ -131,7 +144,7 @@ fn parse_object_recursive<'a>(
                 if curr_token.kind() != TokenKind::RightParen {
                     match parse_object_recursive(tokens, token_cursor) {
                         Ok(object) => {
-                            list.push_back(object);
+                            tail = reverse_list_with_tail(tail, object);
 
                             // The cursor is incremented in parse_object_recursive(), we should
                             // check the bound and update the curr_token.
@@ -146,6 +159,8 @@ fn parse_object_recursive<'a>(
                         Err(e) => return Err(e),
                     }
                 }
+            } else {
+                tail = reverse_list(tail);
             }
 
             if curr_token.kind() != TokenKind::RightParen {
@@ -158,7 +173,7 @@ fn parse_object_recursive<'a>(
             // Advance cursor, eat ')'.
             *token_cursor += 1;
 
-            return Ok(Object::List(list));
+            return Ok(tail);
         }
         TokenKind::Float | TokenKind::Int => {
             return Ok(parse_number(tokens, token_cursor)?);
@@ -214,101 +229,119 @@ mod tests {
     fn test_parse_list() {
         assert_eq!(
             parse_program("(1 2 3)").unwrap(),
-            Object::List(
-                vec![Object::Int(1), Object::Int(2), Object::Int(3)]
-                    .into_iter()
-                    .collect()
+            Object::Cons(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Int(2)),
+                    Box::new(Object::Cons(
+                        Box::new(Object::Int(3)),
+                        Box::new(Object::Nil)
+                    ))
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(1 (2 3))").unwrap(),
-            Object::List(
-                vec![
-                    Object::Int(1),
-                    Object::List(vec![Object::Int(2), Object::Int(3)].into_iter().collect())
-                ]
-                .into_iter()
-                .collect()
+            Object::Cons(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Cons(
+                        Box::new(Object::Int(2)),
+                        Box::new(Object::Cons(
+                            Box::new(Object::Int(3)),
+                            Box::new(Object::Nil)
+                        ))
+                    )),
+                    Box::new(Object::Nil)
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(1 -2 -3)").unwrap(),
-            Object::List(
-                vec![Object::Int(1), Object::Int(-2), Object::Int(-3)]
-                    .into_iter()
-                    .collect()
+            Object::Cons(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Int(-2)),
+                    Box::new(Object::Cons(
+                        Box::new(Object::Int(-3)),
+                        Box::new(Object::Nil)
+                    ))
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(1 (-2.5 3))").unwrap(),
-            Object::List(
-                vec![
-                    Object::Int(1),
-                    Object::List(
-                        vec![Object::Real(-2.5), Object::Int(3)]
-                            .into_iter()
-                            .collect()
-                    )
-                ]
-                .into_iter()
-                .collect()
+            Object::Cons(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Cons(
+                        Box::new(Object::Real(-2.5)),
+                        Box::new(Object::Cons(
+                            Box::new(Object::Int(3)),
+                            Box::new(Object::Nil)
+                        ))
+                    )),
+                    Box::new(Object::Nil)
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(1 -2 #t)").unwrap(),
-            Object::List(
-                vec![Object::Int(1), Object::Int(-2), Object::Bool(true)]
-                    .into_iter()
-                    .collect()
+            Object::Cons(
+                Box::new(Object::Int(1)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Int(-2)),
+                    Box::new(Object::Cons(
+                        Box::new(Object::Bool(true)),
+                        Box::new(Object::Nil)
+                    ))
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(#f (-2.5 3))").unwrap(),
-            Object::List(
-                vec![
-                    Object::Bool(false),
-                    Object::List(
-                        vec![Object::Real(-2.5), Object::Int(3)]
-                            .into_iter()
-                            .collect()
-                    )
-                ]
-                .into_iter()
-                .collect()
+            Object::Cons(
+                Box::new(Object::Bool(false)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Cons(
+                        Box::new(Object::Real(-2.5)),
+                        Box::new(Object::Cons(
+                            Box::new(Object::Int(3)),
+                            Box::new(Object::Nil)
+                        ))
+                    )),
+                    Box::new(Object::Nil)
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(#f . (-2.5 . 3))").unwrap(),
-            Object::List(
-                vec![
-                    Object::Bool(false),
-                    Object::List(
-                        vec![Object::Real(-2.5), Object::Int(3)]
-                            .into_iter()
-                            .collect()
-                    )
-                ]
-                .into_iter()
-                .collect()
+            Object::Cons(
+                Box::new(Object::Bool(false)),
+                Box::new(Object::Cons(
+                    Box::new(Object::Real(-2.5)),
+                    Box::new(Object::Int(3))
+                ))
             )
         );
 
         assert_eq!(
             parse_program("(+ 1 3)").unwrap(),
-            Object::List(
-                vec![
-                    Object::Symbol(String::from("+")),
-                    Object::Int(1),
-                    Object::Int(3)
-                ]
-                .into_iter()
-                .collect()
+            Object::Cons(
+                Box::new(Object::Symbol(String::from("+"))),
+                Box::new(Object::Cons(
+                    Box::new(Object::Int(1)),
+                    Box::new(Object::Cons(
+                        Box::new(Object::Int(3)),
+                        Box::new(Object::Nil)
+                    ))
+                ))
             )
         );
     }
