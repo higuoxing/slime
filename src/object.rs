@@ -9,3 +9,9 @@ pub enum Object {
     Symbol(String),
     Cons(Box<Object>, Box<Object>),
 }
+
+impl Object {
+    pub fn cons(car: Object, cdr: Object) -> Object {
+        Object::Cons(Box::new(car), Box::new(cdr))
+    }
+}

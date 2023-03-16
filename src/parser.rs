@@ -76,7 +76,7 @@ fn parse_symbol<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result
 fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
     while let Object::Cons(car, cdr) = list {
         let next = *cdr;
-        list = Object::Cons(car, Box::new(tail));
+        list = Object::cons(*car, tail);
         tail = list;
         list = next;
     }
@@ -119,7 +119,7 @@ fn parse_object_recursive<'a>(
                 && curr_token.kind() != TokenKind::Dot
             {
                 if let Ok(object) = parse_object_recursive(tokens, token_cursor) {
-                    tail = Object::Cons(Box::new(object), Box::new(tail));
+                    tail = Object::cons(object, tail);
                 } else {
                     return Err(Errors::UnexpectedToken(
                         curr_token.line(),
@@ -229,119 +229,83 @@ mod tests {
     fn test_parse_list() {
         assert_eq!(
             parse_program("(1 2 3)").unwrap(),
-            Object::Cons(
-                Box::new(Object::Int(1)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Int(2)),
-                    Box::new(Object::Cons(
-                        Box::new(Object::Int(3)),
-                        Box::new(Object::Nil)
-                    ))
-                ))
+            Object::cons(
+                Object::Int(1),
+                Object::cons(Object::Int(2), Object::cons(Object::Int(3), Object::Nil))
             )
         );
 
         assert_eq!(
             parse_program("(1 (2 3))").unwrap(),
-            Object::Cons(
-                Box::new(Object::Int(1)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Cons(
-                        Box::new(Object::Int(2)),
-                        Box::new(Object::Cons(
-                            Box::new(Object::Int(3)),
-                            Box::new(Object::Nil)
-                        ))
-                    )),
-                    Box::new(Object::Nil)
-                ))
+            Object::cons(
+                Object::Int(1),
+                Object::cons(
+                    Object::cons(Object::Int(2), Object::cons(Object::Int(3), Object::Nil)),
+                    Object::Nil
+                )
             )
         );
 
         assert_eq!(
             parse_program("(1 -2 -3)").unwrap(),
-            Object::Cons(
-                Box::new(Object::Int(1)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Int(-2)),
-                    Box::new(Object::Cons(
-                        Box::new(Object::Int(-3)),
-                        Box::new(Object::Nil)
-                    ))
-                ))
+            Object::cons(
+                Object::Int(1),
+                Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
             )
         );
 
         assert_eq!(
             parse_program("(1 (-2.5 3))").unwrap(),
-            Object::Cons(
-                Box::new(Object::Int(1)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Cons(
-                        Box::new(Object::Real(-2.5)),
-                        Box::new(Object::Cons(
-                            Box::new(Object::Int(3)),
-                            Box::new(Object::Nil)
-                        ))
-                    )),
-                    Box::new(Object::Nil)
-                ))
+            Object::cons(
+                Object::Int(1),
+                Object::cons(
+                    Object::cons(
+                        Object::Real(-2.5),
+                        Object::cons(Object::Int(3), Object::Nil)
+                    ),
+                    Object::Nil
+                )
             )
         );
 
         assert_eq!(
             parse_program("(1 -2 #t)").unwrap(),
-            Object::Cons(
-                Box::new(Object::Int(1)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Int(-2)),
-                    Box::new(Object::Cons(
-                        Box::new(Object::Bool(true)),
-                        Box::new(Object::Nil)
-                    ))
-                ))
+            Object::cons(
+                Object::Int(1),
+                Object::cons(
+                    Object::Int(-2),
+                    Object::cons(Object::Bool(true), Object::Nil)
+                )
             )
         );
 
         assert_eq!(
             parse_program("(#f (-2.5 3))").unwrap(),
-            Object::Cons(
-                Box::new(Object::Bool(false)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Cons(
-                        Box::new(Object::Real(-2.5)),
-                        Box::new(Object::Cons(
-                            Box::new(Object::Int(3)),
-                            Box::new(Object::Nil)
-                        ))
-                    )),
-                    Box::new(Object::Nil)
-                ))
+            Object::cons(
+                Object::Bool(false),
+                Object::cons(
+                    Object::cons(
+                        Object::Real(-2.5),
+                        Object::cons(Object::Int(3), Object::Nil)
+                    ),
+                    Object::Nil
+                )
             )
         );
 
         assert_eq!(
             parse_program("(#f . (-2.5 . 3))").unwrap(),
-            Object::Cons(
-                Box::new(Object::Bool(false)),
-                Box::new(Object::Cons(
-                    Box::new(Object::Real(-2.5)),
-                    Box::new(Object::Int(3))
-                ))
+            Object::cons(
+                Object::Bool(false),
+                Object::cons(Object::Real(-2.5), Object::Int(3))
             )
         );
 
         assert_eq!(
             parse_program("(+ 1 3)").unwrap(),
-            Object::Cons(
-                Box::new(Object::Symbol(String::from("+"))),
-                Box::new(Object::Cons(
-                    Box::new(Object::Int(1)),
-                    Box::new(Object::Cons(
-                        Box::new(Object::Int(3)),
-                        Box::new(Object::Nil)
-                    ))
-                ))
+            Object::cons(
+                Object::Symbol(String::from("+")),
+                Object::cons(Object::Int(1), Object::cons(Object::Int(3), Object::Nil))
             )
         );
 
