@@ -73,6 +73,101 @@ fn parse_symbol<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result
     }
 }
 
+fn parse_char_code(char_: &str, line: i64, column: i64) -> Result<u32, Errors> {
+    if char_.len() == 1 {
+        match char_.chars().nth(0) {
+            Some(c) => Ok(c as u32),
+            None => Err(Errors::UnexpectedToken(line, column)),
+        }
+    } else {
+        // https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
+        // Character Name          ASCII Name
+        // --------------          ----------
+        //
+        // altmode                 ESC
+        // backnext                US
+        // backspace               BS
+        // call                    SUB
+        // linefeed                LF
+        // page                    FF
+        // return                  CR
+        // rubout                  DEL
+        // space
+        // tab                     HT
+        match char_.to_uppercase().as_str() {
+            "ALTMODE" | "ESC" => Ok(27 as u32),
+            "BACKNEXT" | "US" => Ok(31 as u32),
+            "BACKSPACE" | "BS" => Ok(8 as u32),
+            "CALL" | "SUB" => Ok(26 as u32),
+            "LINEFEED" | "LF" => Ok(10 as u32),
+            "PAGE" | "FF" => Ok(12 as u32),
+            "RETURN" | "CR" => Ok(13 as u32),
+            "RUBOUT" | "DEL" => Ok(127 as u32),
+            "SPACE" | "SPC" => Ok(32 as u32),
+            "TAB" | "HT" => Ok(9 as u32),
+            // FIXME: Let's add more???
+            _ => Err(Errors::UnexpectedToken(line, column)),
+        }
+    }
+}
+
+fn parse_bucky_bits(bucky_bit: &str, line: i64, column: i64) -> Result<u32, Errors> {
+    // https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
+    // Key             Bucky bit prefix        Bucky bit
+    // ---             ----------------        ---------
+    //
+    // Meta            M- or Meta-                 1
+    // Control         C- or Control-              2
+    // Super           S- or Super-                4
+    // Hyper           H- or Hyper-                8
+    // Top             T- or Top-                 16
+    match bucky_bit.to_uppercase().as_str() {
+        "META" | "M" => Ok(1 as u32),
+        "CONTROL" | "C" => Ok(2 as u32),
+        "SUPER" | "S" => Ok(4 as u32),
+        "HYPER" | "H" => Ok(8 as u32),
+        "TOP" | "T" => Ok(16 as u32),
+        _ => Err(Errors::UnexpectedToken(line, column)),
+    }
+}
+
+fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
+    let curr_token = tokens[*token_cursor];
+    match curr_token.kind() {
+        TokenKind::Char => {
+            // This may not be necessary, but we check it anyway.
+            if curr_token.literal().len() <= 2 {
+                return Err(Errors::UnexpectedToken(
+                    curr_token.line(),
+                    curr_token.column(),
+                ));
+            }
+
+            // Remove the '#\' part.
+            let char_part = &curr_token.literal()[2..];
+            // Split it by '-'
+            let char_tokens: Vec<_> = char_part.split("-").collect();
+            let mut bucky_bits = 0;
+            let mut char_code = 0;
+
+            for (tok_idx, tok) in char_tokens.iter().enumerate() {
+                if tok_idx != char_tokens.len() - 1 {
+                    bucky_bits |= parse_bucky_bits(tok, curr_token.line(), curr_token.column())?;
+                } else {
+                    char_code = parse_char_code(tok, curr_token.line(), curr_token.column())?;
+                }
+            }
+
+            *token_cursor += 1;
+            return Ok(Object::Char(char_code, bucky_bits));
+        }
+        _ => Err(Errors::UnexpectedToken(
+            curr_token.line(),
+            curr_token.column(),
+        )),
+    }
+}
+
 fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
     while let Object::Cons(car, cdr) = list {
         let next = *cdr;
@@ -183,6 +278,9 @@ fn parse_object_recursive<'a>(
         }
         TokenKind::Symbol => {
             return Ok(parse_symbol(tokens, token_cursor)?);
+        }
+        TokenKind::Char => {
+            return Ok(parse_char(tokens, token_cursor)?);
         }
         _ => {
             panic!("Not implemented!");
@@ -310,5 +408,40 @@ mod tests {
         );
 
         assert_eq!(parse_program("()").unwrap(), Object::Nil);
+
+        assert_eq!(
+            parse_program(
+                "(#\\a #\\b #\\c  #\\space #\\c-a #\\control-a #\\meta-b #\\0 #\\9 #\\liNeFeed)"
+            )
+            .unwrap(),
+            Object::cons(
+                Object::Char(97, 0),
+                Object::cons(
+                    Object::Char(98, 0),
+                    Object::cons(
+                        Object::Char(99, 0),
+                        Object::cons(
+                            Object::Char(32, 0),
+                            Object::cons(
+                                Object::Char(97, 2),
+                                Object::cons(
+                                    Object::Char(97, 2),
+                                    Object::cons(
+                                        Object::Char(98, 1),
+                                        Object::cons(
+                                            Object::Char(48, 0),
+                                            Object::cons(
+                                                Object::Char(57, 0),
+                                                Object::cons(Object::Char(10, 0), Object::Nil)
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        );
     }
 }

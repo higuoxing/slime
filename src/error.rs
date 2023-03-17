@@ -2,7 +2,7 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum Errors {
-    #[error("Unexpected token at {0}:{1}")]
+    #[error("Unexpected token at line: {0} column: {1}")]
     UnexpectedToken(i64, i64),
     #[error("{0}")]
     RuntimeException(String),

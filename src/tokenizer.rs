@@ -343,7 +343,7 @@ impl<'a> Tokenizer<'a> {
                                         program_char_indices.clone();
 
                                     while let Some((_, ch)) = program_char_indices.next() {
-                                        if ch.is_alphanumeric() {
+                                        if ch.is_alphanumeric() || ch == '-' {
                                             charlen += ch.len_utf8();
                                             prev_program_char_indices =
                                                 program_char_indices.clone();
@@ -477,17 +477,16 @@ mod tests {
     #[test]
     fn test_tokenizer() {
         // Test tokenize various symbols.
-        let program = String::from(
-            "( (  ) ) . \n, @ #f #t #(
+        assert_eq!(
+            Tokenizer::tokenize(
+                "( (  ) ) . \n, @ #f #t #(
 
   \" some string\" #(  3.1415926   (()) 3333  (()) some_symbol
 some_symbol2  (())
 `;; this is comment
 foo
-#\\newline (())",
-        );
-        assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+#\\newline (())"
+            ),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("(", 1, 3, TokenKind::LeftParen),
@@ -527,9 +526,8 @@ foo
             ])
         );
 
-        let program = String::from("(+  1 2)");
         assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+            Tokenizer::tokenize("(+  1 2)"),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("+", 1, 2, TokenKind::Symbol),
@@ -539,9 +537,8 @@ foo
             ])
         );
 
-        let program = String::from("(- 1 -99999)");
         assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+            Tokenizer::tokenize("(- 1 -99999)"),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("-", 1, 2, TokenKind::Symbol),
@@ -551,9 +548,8 @@ foo
             ])
         );
 
-        let program = String::from("(- 1 -999.99)");
         assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+            Tokenizer::tokenize("(- 1 -999.99)"),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("-", 1, 2, TokenKind::Symbol),
@@ -563,9 +559,8 @@ foo
             ])
         );
 
-        let program = String::from("(- 1 \"string with escape character\\n\")");
         assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+            Tokenizer::tokenize("(- 1 \"string with escape character\\n\")"),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("-", 1, 2, TokenKind::Symbol),
@@ -580,9 +575,8 @@ foo
             ])
         );
 
-        let program = String::from("(symbol->string 'flying-fish)");
         assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+            Tokenizer::tokenize("(symbol->string 'flying-fish)"),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("symbol->string", 1, 2, TokenKind::Symbol),
@@ -592,17 +586,16 @@ foo
             ])
         );
 
-        let program = String::from(
-            "(define counter
+        assert_eq!(
+            Tokenizer::tokenize(
+                "(define counter
     ((lambda (val)
        (lambda () (setq val (+ val 1)) val))
      0))
   (counter)
 
-  (counter)",
-        );
-        assert_eq!(
-            Tokenizer::tokenize(program.as_str()),
+  (counter)"
+            ),
             Ok(vec![
                 Token::new("(", 1, 1, TokenKind::LeftParen),
                 Token::new("define", 1, 2, TokenKind::Symbol),
@@ -638,6 +631,27 @@ foo
                 Token::new("(", 7, 3, TokenKind::LeftParen),
                 Token::new("counter", 7, 4, TokenKind::Symbol),
                 Token::new(")", 7, 11, TokenKind::RightParen)
+            ])
+        );
+
+        assert_eq!(
+            Tokenizer::tokenize(
+                "(#\\a #\\b #\\c  #\\space #\\c-a #\\control-a #\\meta-b #\\c-m-a  #\\C-M-a #\\0 #\\9)"
+            ),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("#\\a", 1, 2, TokenKind::Char),
+                Token::new("#\\b", 1, 6, TokenKind::Char),
+                Token::new("#\\c", 1, 10, TokenKind::Char),
+                Token::new("#\\space", 1, 15, TokenKind::Char),
+                Token::new("#\\c-a", 1, 23, TokenKind::Char),
+                Token::new("#\\control-a", 1, 29, TokenKind::Char),
+                Token::new("#\\meta-b", 1, 41, TokenKind::Char),
+                Token::new("#\\c-m-a", 1, 50, TokenKind::Char),
+                Token::new("#\\C-M-a", 1, 59, TokenKind::Char),
+                Token::new("#\\0", 1, 67, TokenKind::Char),
+                Token::new("#\\9", 1, 71, TokenKind::Char),
+                Token::new(")", 1, 74, TokenKind::RightParen)
             ])
         );
     }
