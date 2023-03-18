@@ -1,3 +1,7 @@
+use std::cell::RefCell;
+use std::convert::TryInto;
+use std::rc::Rc;
+
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
@@ -170,10 +174,8 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
 
 fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
     while let Object::Cons(car, cdr) = list {
-        let next = *cdr;
-        list = Object::cons(*car, tail);
-        tail = list;
-        list = next;
+        tail = Object::cons(car.take(), tail);
+        list = cdr.take();
     }
     tail
 }
@@ -190,12 +192,10 @@ fn parse_object_recursive<'a>(
     let curr_token = tokens[*token_cursor];
 
     match curr_token.kind() {
-        TokenKind::Dot => {
-            return Err(Errors::UnexpectedToken(
-                curr_token.line(),
-                curr_token.column(),
-            ))
-        }
+        TokenKind::Dot => Err(Errors::UnexpectedToken(
+            curr_token.line(),
+            curr_token.column(),
+        )),
         TokenKind::LeftParen => {
             let mut tail = Object::Nil;
 
@@ -268,20 +268,12 @@ fn parse_object_recursive<'a>(
             // Advance cursor, eat ')'.
             *token_cursor += 1;
 
-            return Ok(tail);
+            Ok(tail)
         }
-        TokenKind::Float | TokenKind::Int => {
-            return Ok(parse_number(tokens, token_cursor)?);
-        }
-        TokenKind::Bool => {
-            return Ok(parse_bool(tokens, token_cursor)?);
-        }
-        TokenKind::Symbol => {
-            return Ok(parse_symbol(tokens, token_cursor)?);
-        }
-        TokenKind::Char => {
-            return Ok(parse_char(tokens, token_cursor)?);
-        }
+        TokenKind::Float | TokenKind::Int => Ok(parse_number(tokens, token_cursor)?),
+        TokenKind::Bool => Ok(parse_bool(tokens, token_cursor)?),
+        TokenKind::Symbol => Ok(parse_symbol(tokens, token_cursor)?),
+        TokenKind::Char => Ok(parse_char(tokens, token_cursor)?),
         _ => {
             panic!("Not implemented!");
         }
@@ -293,29 +285,39 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
     let tokens = tokenizer.tokens();
     let token_len = tokens.len();
     let mut token_cursor = 0;
+    let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
 
-    while token_cursor < token_len {
-        let curr_token = tokens[token_cursor];
+    if token_cursor < token_len {
+        result = Object::cons(result, Object::Nil);
 
-        match curr_token.kind() {
-            TokenKind::LeftParen => match parse_object_recursive(tokens, &mut token_cursor) {
-                Ok(object) => {
-                    return Ok(object);
+        while token_cursor < token_len {
+            let curr_token = tokens[token_cursor];
+
+            match curr_token.kind() {
+                TokenKind::LeftParen => match parse_object_recursive(tokens, &mut token_cursor) {
+                    Ok(object) => {
+                        result = Object::cons(object, result);
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                },
+                _ => {
+                    return Err(Errors::UnexpectedToken(
+                        curr_token.line(),
+                        curr_token.column(),
+                    ));
                 }
-                Err(e) => {
-                    return Err(e);
-                }
-            },
-            _ => {
-                return Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ));
             }
         }
+
+        // Insert a BEGIN symbol if we have multiple expressions.
+        // See: 4.2.3  Sequencing
+        // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
+        result = Object::begin(reverse_list(result));
     }
 
-    panic!("Unreachable!");
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -341,15 +343,24 @@ mod tests {
                     Object::cons(Object::Int(2), Object::cons(Object::Int(3), Object::Nil)),
                     Object::Nil
                 )
-            )
+            ),
         );
 
         assert_eq!(
-            parse_program("(1 -2 -3)").unwrap(),
-            Object::cons(
-                Object::Int(1),
-                Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
-            )
+            parse_program("(1 -2 -3) (+1 -2 -3)").unwrap(),
+            Object::begin(Object::cons(
+                Object::cons(
+                    Object::Int(1),
+                    Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
+                ),
+                Object::cons(
+                    Object::cons(
+                        Object::Int(1),
+                        Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
+                    ),
+                    Object::Nil
+                )
+            ))
         );
 
         assert_eq!(
@@ -442,6 +453,14 @@ mod tests {
                     )
                 )
             )
+        );
+
+        assert_eq!(
+            parse_program("()()").unwrap(),
+            Object::begin(Object::cons(
+                Object::Nil,
+                Object::cons(Object::Nil, Object::Nil)
+            ))
         );
     }
 }
