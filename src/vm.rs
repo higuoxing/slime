@@ -36,18 +36,18 @@ impl Machine {
         let mut curr_expr = self.stack.pop().unwrap();
 
         loop {
-            match curr_expr.take() {
-                Object::Cons(car, cdr) => match car.take() {
-                    Object::Symbol(sym) => {
-                        let symbol_name = sym.to_uppercase();
-                        match symbol_name.as_str() {
-                            // Firstly, try to process some pre-defined symbols.
+            match &*curr_expr.clone().borrow() {
+                Object::Cons(ref car, ref cdr) => match *car.clone().borrow() {
+                    Object::Symbol(ref sym) => {
+                        let callable_sym = sym.to_uppercase();
+                        match callable_sym.as_str() {
+                            // Firstly, try to process pre-defined symbols.
                             "BEGIN" => {
-                                curr_expr = Rc::new(RefCell::new(Object::make_begin(cdr.take())));
+                                curr_expr = Rc::new(RefCell::new(Object::Begin(cdr.clone())));
                                 continue;
                             }
                             "DEFINE" => {
-                                let define_body = Object::cons_to_vec(cdr.take())?;
+                                let define_body = Object::cons_to_vec(cdr.clone())?;
 
                                 if define_body.len() != 2 || !define_body[0].borrow().is_symbol() {
                                     return Err(Errors::RuntimeException(format!(
@@ -62,7 +62,7 @@ impl Machine {
                                 continue;
                             }
                             "IF" => {
-                                let if_body = Object::cons_to_vec(cdr.take())?;
+                                let if_body = Object::cons_to_vec(cdr.clone())?;
 
                                 if if_body.len() != 3 {
                                     return Err(Errors::RuntimeException(format!("'IF' should be followed by a condition clause, a then clause and a else clause")));
@@ -77,47 +77,45 @@ impl Machine {
                             _ => todo!(),
                         }
                     }
-                    o => {
+                    ref o => {
                         return Err(Errors::RuntimeException(format!(
                             "The object '{:?}' is not applicable.",
                             o
                         )))
                     }
                 },
-                Object::Define(symbol_name, val) => {
-                    self.stack.push(val);
-                    let evaluated_val = self.eval_recursive()?;
-
-                    match self.env.get_mut(symbol_name.as_str()) {
-                        Some(list) => {
-                            list.push_back(Rc::new(RefCell::new(evaluated_val)));
-                        }
-                        None => {
-                            let mut list = LinkedList::new();
-                            list.push_back(Rc::new(RefCell::new(evaluated_val)));
-                            self.env.insert(symbol_name, list);
-                        }
-                    }
-
-                    return Ok(Object::Nil);
-                }
-                Object::Begin(seq) => {
-                    curr_expr = Rc::new(RefCell::new(seq.take()));
-                    let exprs = Object::cons_to_vec(curr_expr.take())?;
+                Object::Begin(ref seq) => {
+                    let exprs = Object::cons_to_vec(seq.clone())?;
                     let mut result = Object::Nil;
 
                     for expr in exprs {
-                        // Evaluate (begin E1 E2 E3 ... ) sequentially.
+                        // Evaluate (begin E1 E2 E3 ...) sequentially.
                         self.stack.push(expr);
                         result = self.eval_recursive()?;
                     }
 
                     return Ok(result);
                 }
-                Object::If(cond, then, otherwise) => {
-                    todo!();
+                Object::Define(ref symbol_name, ref val) => {
+                    self.stack.push(val.clone());
+
+                    let evaluated_val = Rc::new(RefCell::new(self.eval_recursive()?));
+
+                    match self.env.get_mut(symbol_name.as_str()) {
+                        Some(list) => {
+                            list.push_back(evaluated_val);
+                        }
+                        None => {
+                            let mut list = LinkedList::new();
+                            list.push_back(evaluated_val);
+                            self.env.insert(symbol_name.clone(), list);
+                        }
+                    }
+
+                    return Ok(Object::Nil);
                 }
-                Object::Symbol(sym) => match self.resolve_symbol(sym.as_str()) {
+                Object::Symbol(ref symbol_name) => match self.resolve_symbol(&symbol_name.as_str())
+                {
                     Some(expr) => {
                         curr_expr = expr;
                         continue;
@@ -125,11 +123,11 @@ impl Machine {
                     None => {
                         return Err(Errors::RuntimeException(format!(
                             "Cannot resolve symbol '{}'",
-                            sym.as_str()
-                        )));
+                            symbol_name.as_str()
+                        )))
                     }
                 },
-                atom => return Ok(atom),
+                atom => return Ok(atom.clone()),
             }
         }
     }

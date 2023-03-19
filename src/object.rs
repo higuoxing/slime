@@ -5,7 +5,7 @@ use std::collections::LinkedList;
 use std::default::Default;
 use std::rc::Rc;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum Object {
     // Default is needed for taking ownership.
     #[default]
@@ -80,17 +80,19 @@ impl Object {
         }
     }
 
-    pub fn cons_to_vec(mut cons: Object) -> Result<Vec<Rc<RefCell<Object>>>, Errors> {
-        if !cons.is_cons() && !cons.is_nil() {
+    pub fn cons_to_vec(mut cons: Rc<RefCell<Object>>) -> Result<Vec<Rc<RefCell<Object>>>, Errors> {
+        if !cons.borrow().is_cons() && !cons.borrow().is_nil() {
             Err(Errors::RuntimeException(format!(
                 "Canont expand a non-Cons object to linked list."
             )))
         } else {
             let mut result = vec![];
-            while let Object::Cons(car, cdr) = cons {
-                result.push(car);
-                cons = cdr.take();
+
+            while let Object::Cons(ref car, ref cdr) = *cons.clone().borrow() {
+                result.push(car.clone());
+                cons = cdr.clone();
             }
+
             Ok(result)
         }
     }
@@ -105,7 +107,11 @@ mod tests {
     #[test]
     fn test_cons_to_vec() {
         assert_eq!(
-            Object::cons_to_vec(Object::make_cons(Object::Int(1), Object::Nil)).unwrap(),
+            Object::cons_to_vec(Rc::new(RefCell::new(Object::make_cons(
+                Object::Int(1),
+                Object::Nil
+            ))))
+            .unwrap(),
             vec![Rc::new(RefCell::new(Object::Int(1)))]
         )
     }
