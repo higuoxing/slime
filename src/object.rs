@@ -29,6 +29,10 @@ pub enum Object {
         /* else */ Rc<RefCell<Object>>,
     ),
     Define(String, Rc<RefCell<Object>>),
+    Lambda(
+        /* arguments */ Vec<String>,
+        /* lambda body */ Rc<RefCell<Object>>,
+    ),
 }
 
 impl Object {

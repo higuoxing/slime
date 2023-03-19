@@ -1,12 +1,12 @@
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::collections::{linked_list, HashMap, LinkedList};
+use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
 use crate::error::Errors;
 use crate::object::Object;
 
 struct Machine {
+    // FIXME: The current implementation of env is not correct.
     env: HashMap<String, LinkedList<Rc<RefCell<Object>>>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
@@ -74,6 +74,30 @@ impl Machine {
                                 )));
                                 continue;
                             }
+                            "LAMBDA" => {
+                                let lambda_body = Object::cons_to_vec(cdr.clone())?;
+
+                                if lambda_body.len() != 2 {
+                                    return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
+                                }
+
+                                let args = Object::cons_to_vec(lambda_body[0].clone())?;
+                                let mut args_names = vec![];
+                                for arg in args {
+                                    /* Check argument list. */
+                                    if !arg.borrow().is_symbol() {
+                                        return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
+                                    }
+
+                                    args_names.push(arg.borrow().symbol_name());
+                                }
+
+                                curr_expr = Rc::new(RefCell::new(Object::Lambda(
+                                    args_names,
+                                    lambda_body[1].clone(),
+                                )));
+                                continue;
+                            }
                             _ => todo!(),
                         }
                     }
@@ -127,7 +151,30 @@ impl Machine {
                         )))
                     }
                 },
-                atom => return Ok(atom.clone()),
+                Object::If(ref cond, ref then, ref otherwise) => {
+                    self.stack.push(cond.clone());
+                    match self.eval_recursive()? {
+                        Object::Bool(cond_result) => {
+                            if !cond_result {
+                                curr_expr = otherwise.clone();
+                            } else {
+                                curr_expr = then.clone();
+                            }
+                            continue;
+                        }
+                        _ => {
+                            // Any expression that cannot be evaluated to be #f is #t.
+                            curr_expr = then.clone();
+                            continue;
+                        }
+                    }
+                }
+                atom @ Object::Int(_)
+                | atom @ Object::Bool(_)
+                | atom @ Object::Char(_, _)
+                | atom @ Object::Lambda(_, _)
+                | atom @ Object::Real(_)
+                | atom @ Object::Nil => return Ok(atom.clone()),
             }
         }
     }
@@ -187,17 +234,43 @@ mod tests {
         );
         assert_eq!(m.stack.len(), 0);
 
-        // assert_eq!(
-        //     m.eval(parse_program("(if #t 1 2)").unwrap()).unwrap(),
-        //     Object::Int(1)
-        // );
-        // assert_eq!(m.stack.len(), 0);
-        //
-        // assert_eq!(
-        //     m.eval(parse_program("(if #f 1 2)").unwrap()).unwrap(),
-        //     Object::Int(2)
-        // );
-        // assert_eq!(m.stack.len(), 0);
+        assert_eq!(
+            m.eval(parse_program("(if #t 1 2)").unwrap()).unwrap(),
+            Object::Int(1)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(if #f 1 2)").unwrap()).unwrap(),
+            Object::Int(2)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(if 0 1 2)").unwrap()).unwrap(),
+            Object::Int(1)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(if 1 1 2)").unwrap()).unwrap(),
+            Object::Int(1)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(if #f (if #t 4 5) 2)").unwrap())
+                .unwrap(),
+            Object::Int(2)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(if #t (if #t 4 5) 2)").unwrap())
+                .unwrap(),
+            Object::Int(4)
+        );
+        assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(define foo 1)").unwrap()).unwrap(),
@@ -218,5 +291,12 @@ mod tests {
             m.eval(parse_program("foo").unwrap()).unwrap(),
             Object::Int(1)
         );
+
+        assert_eq!(
+            m.eval(parse_program("(if (begin 1 2 #f) 2 3)").unwrap())
+                .unwrap(),
+            Object::Int(3)
+        );
+        assert_eq!(m.stack.len(), 0);
     }
 }
