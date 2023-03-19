@@ -1,4 +1,7 @@
+use crate::error::Errors;
+
 use std::cell::RefCell;
+use std::collections::LinkedList;
 use std::default::Default;
 use std::rc::Rc;
 
@@ -18,17 +21,35 @@ pub enum Object {
         /* car */ Rc<RefCell<Object>>,
         /* cdr */ Rc<RefCell<Object>>,
     ),
-    // Some special symbols for parsed AST.
+    // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
+    If(
+        /* condition */ Rc<RefCell<Object>>,
+        /* then */ Rc<RefCell<Object>>,
+        /* else */ Rc<RefCell<Object>>,
+    ),
+    Define(String, Rc<RefCell<Object>>),
 }
 
 impl Object {
-    pub fn cons(car: Object, cdr: Object) -> Object {
+    pub fn make_cons(car: Object, cdr: Object) -> Object {
         Object::Cons(Rc::new(RefCell::new(car)), Rc::new(RefCell::new(cdr)))
     }
 
-    pub fn begin(object: Object) -> Object {
+    pub fn make_begin(object: Object) -> Object {
         Object::Begin(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_if(cond: Object, then: Object, otherwise: Object) -> Object {
+        Object::If(
+            Rc::new(RefCell::new(cond)),
+            Rc::new(RefCell::new(then)),
+            Rc::new(RefCell::new(otherwise)),
+        )
+    }
+
+    pub fn make_define(symbol_name: String, val: Object) -> Object {
+        Object::Define(symbol_name, Rc::new(RefCell::new(val)))
     }
 
     pub fn is_cons(&self) -> bool {
@@ -36,5 +57,56 @@ impl Object {
             Object::Cons(_, _) => true,
             _ => false,
         }
+    }
+
+    pub fn is_nil(&self) -> bool {
+        match self {
+            Object::Nil => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_symbol(&self) -> bool {
+        match self {
+            Object::Symbol(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn symbol_name(&self) -> String {
+        match self {
+            Object::Symbol(sym) => sym.clone(),
+            _ => format!(""),
+        }
+    }
+
+    pub fn cons_to_vec(mut cons: Object) -> Result<Vec<Rc<RefCell<Object>>>, Errors> {
+        if !cons.is_cons() && !cons.is_nil() {
+            Err(Errors::RuntimeException(format!(
+                "Canont expand a non-Cons object to linked list."
+            )))
+        } else {
+            let mut result = vec![];
+            while let Object::Cons(car, cdr) = cons {
+                result.push(car);
+                cons = cdr.take();
+            }
+            Ok(result)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::object::Object;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    #[test]
+    fn test_cons_to_vec() {
+        assert_eq!(
+            Object::cons_to_vec(Object::make_cons(Object::Int(1), Object::Nil)).unwrap(),
+            vec![Rc::new(RefCell::new(Object::Int(1)))]
+        )
     }
 }

@@ -174,7 +174,7 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
 
 fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
     while let Object::Cons(car, cdr) = list {
-        tail = Object::cons(car.take(), tail);
+        tail = Object::make_cons(car.take(), tail);
         list = cdr.take();
     }
     tail
@@ -214,7 +214,7 @@ fn parse_object_recursive<'a>(
                 && curr_token.kind() != TokenKind::Dot
             {
                 if let Ok(object) = parse_object_recursive(tokens, token_cursor) {
-                    tail = Object::cons(object, tail);
+                    tail = Object::make_cons(object, tail);
                 } else {
                     return Err(Errors::UnexpectedToken(
                         curr_token.line(),
@@ -288,7 +288,7 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
     let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
 
     if token_cursor < token_len {
-        result = Object::cons(result, Object::Nil);
+        result = Object::make_cons(result, Object::Nil);
 
         while token_cursor < token_len {
             let curr_token = tokens[token_cursor];
@@ -296,7 +296,7 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
             match curr_token.kind() {
                 TokenKind::LeftParen => match parse_object_recursive(tokens, &mut token_cursor) {
                     Ok(object) => {
-                        result = Object::cons(object, result);
+                        result = Object::make_cons(object, result);
                     }
                     Err(e) => {
                         return Err(e);
@@ -314,7 +314,7 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
         // Insert a BEGIN symbol if we have multiple expressions.
         // See: 4.2.3  Sequencing
         // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-        result = Object::begin(reverse_list(result));
+        result = Object::make_begin(reverse_list(result));
     }
 
     Ok(result)
@@ -329,18 +329,24 @@ mod tests {
     fn test_parse_list() {
         assert_eq!(
             parse_program("(1 2 3)").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Int(1),
-                Object::cons(Object::Int(2), Object::cons(Object::Int(3), Object::Nil))
+                Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
             )
         );
 
         assert_eq!(
             parse_program("(1 (2 3))").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Int(1),
-                Object::cons(
-                    Object::cons(Object::Int(2), Object::cons(Object::Int(3), Object::Nil)),
+                Object::make_cons(
+                    Object::make_cons(
+                        Object::Int(2),
+                        Object::make_cons(Object::Int(3), Object::Nil)
+                    ),
                     Object::Nil
                 )
             ),
@@ -348,15 +354,21 @@ mod tests {
 
         assert_eq!(
             parse_program("(1 -2 -3) (+1 -2 -3)").unwrap(),
-            Object::begin(Object::cons(
-                Object::cons(
+            Object::make_begin(Object::make_cons(
+                Object::make_cons(
                     Object::Int(1),
-                    Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
+                    Object::make_cons(
+                        Object::Int(-2),
+                        Object::make_cons(Object::Int(-3), Object::Nil)
+                    )
                 ),
-                Object::cons(
-                    Object::cons(
+                Object::make_cons(
+                    Object::make_cons(
                         Object::Int(1),
-                        Object::cons(Object::Int(-2), Object::cons(Object::Int(-3), Object::Nil))
+                        Object::make_cons(
+                            Object::Int(-2),
+                            Object::make_cons(Object::Int(-3), Object::Nil)
+                        )
                     ),
                     Object::Nil
                 )
@@ -365,12 +377,12 @@ mod tests {
 
         assert_eq!(
             parse_program("(1 (-2.5 3))").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Int(1),
-                Object::cons(
-                    Object::cons(
+                Object::make_cons(
+                    Object::make_cons(
                         Object::Real(-2.5),
-                        Object::cons(Object::Int(3), Object::Nil)
+                        Object::make_cons(Object::Int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -379,23 +391,23 @@ mod tests {
 
         assert_eq!(
             parse_program("(1 -2 #t)").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Int(1),
-                Object::cons(
+                Object::make_cons(
                     Object::Int(-2),
-                    Object::cons(Object::Bool(true), Object::Nil)
+                    Object::make_cons(Object::Bool(true), Object::Nil)
                 )
             )
         );
 
         assert_eq!(
             parse_program("(#f (-2.5 3))").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Bool(false),
-                Object::cons(
-                    Object::cons(
+                Object::make_cons(
+                    Object::make_cons(
                         Object::Real(-2.5),
-                        Object::cons(Object::Int(3), Object::Nil)
+                        Object::make_cons(Object::Int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -404,17 +416,20 @@ mod tests {
 
         assert_eq!(
             parse_program("(#f . (-2.5 . 3))").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Bool(false),
-                Object::cons(Object::Real(-2.5), Object::Int(3))
+                Object::make_cons(Object::Real(-2.5), Object::Int(3))
             )
         );
 
         assert_eq!(
             parse_program("(+ 1 3)").unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Symbol(String::from("+")),
-                Object::cons(Object::Int(1), Object::cons(Object::Int(3), Object::Nil))
+                Object::make_cons(
+                    Object::Int(1),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
             )
         );
 
@@ -425,25 +440,25 @@ mod tests {
                 "(#\\a #\\b #\\c  #\\space #\\c-a #\\control-a #\\meta-b #\\0 #\\9 #\\liNeFeed)"
             )
             .unwrap(),
-            Object::cons(
+            Object::make_cons(
                 Object::Char(97, 0),
-                Object::cons(
+                Object::make_cons(
                     Object::Char(98, 0),
-                    Object::cons(
+                    Object::make_cons(
                         Object::Char(99, 0),
-                        Object::cons(
+                        Object::make_cons(
                             Object::Char(32, 0),
-                            Object::cons(
+                            Object::make_cons(
                                 Object::Char(97, 2),
-                                Object::cons(
+                                Object::make_cons(
                                     Object::Char(97, 2),
-                                    Object::cons(
+                                    Object::make_cons(
                                         Object::Char(98, 1),
-                                        Object::cons(
+                                        Object::make_cons(
                                             Object::Char(48, 0),
-                                            Object::cons(
+                                            Object::make_cons(
                                                 Object::Char(57, 0),
-                                                Object::cons(Object::Char(10, 0), Object::Nil)
+                                                Object::make_cons(Object::Char(10, 0), Object::Nil)
                                             )
                                         )
                                     )
@@ -457,9 +472,9 @@ mod tests {
 
         assert_eq!(
             parse_program("()()").unwrap(),
-            Object::begin(Object::cons(
+            Object::make_begin(Object::make_cons(
                 Object::Nil,
-                Object::cons(Object::Nil, Object::Nil)
+                Object::make_cons(Object::Nil, Object::Nil)
             ))
         );
     }
