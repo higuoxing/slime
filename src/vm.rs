@@ -7,20 +7,20 @@ use crate::object::Object;
 
 struct Machine {
     // FIXME: The current implementation of env is not correct.
-    env: HashMap<String, LinkedList<Rc<RefCell<Object>>>>,
+    env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
 impl Machine {
     pub fn new() -> Self {
         Self {
-            env: HashMap::new(),
+            env: LinkedList::new(),
             stack: vec![],
         }
     }
 
     pub fn reset(&mut self) {
-        self.env = HashMap::new();
+        self.env = LinkedList::new();
         self.stack = vec![];
     }
 
@@ -28,8 +28,31 @@ impl Machine {
         Ok(expr)
     }
 
-    fn resolve_symbol(&self, sym: &str) -> Option<Rc<RefCell<Object>>> {
-        self.env.get(sym)?.back().cloned()
+    fn resolve_symbol(&self, sym: &str) -> Result<Rc<RefCell<Object>>, Errors> {
+        for node in self.env.iter() {
+            match node.get(sym) {
+                Some(v) => return Ok(v.clone()),
+                None => continue,
+            }
+        }
+        return Err(Errors::RuntimeException(format!(
+            "Cannot resolve symbol '{}'",
+            sym
+        )));
+    }
+
+    fn define_symbol(&mut self, sym: &str, val: Rc<RefCell<Object>>) -> Result<(), Errors> {
+        match self.env.front_mut() {
+            Some(env) => {
+                if let Some(v) = env.get_mut(sym) {
+                    *v = val.clone();
+                } else {
+                    env.insert(sym.to_string(), val.clone());
+                }
+                Ok(())
+            }
+            None => panic!("You should provide an enviroment first!"),
+        }
     }
 
     fn eval_recursive(&mut self) -> Result<Object, Errors> {
@@ -92,14 +115,43 @@ impl Machine {
                                     args_names.push(arg.borrow().symbol_name());
                                 }
 
-                                curr_expr = Rc::new(RefCell::new(Object::Lambda(
-                                    args_names,
-                                    lambda_body[1].clone(),
-                                )));
+                                return Ok(Object::Lambda(args_names, lambda_body[1].clone()));
+                            }
+                            _ => {
+                                // Try to evaluate sym.
+                                // FIXME: This is not perfect ... but it works ...
+                                // Try to improve it tomorrow!
+                                let resolved_sym = self.resolve_symbol(sym)?;
+                                self.stack.push(resolved_sym);
+                                let evaluated_sym = Rc::new(RefCell::new(self.eval_recursive()?));
+                                curr_expr =
+                                    Rc::new(RefCell::new(Object::Cons(evaluated_sym, cdr.clone())));
                                 continue;
                             }
-                            _ => todo!(),
                         }
+                    }
+                    Object::Lambda(ref lambda_args, ref lambda_body) => {
+                        // Lambda expression is callable.
+                        let args_exprs = Object::cons_to_vec(cdr.clone())?;
+                        if lambda_args.len() != args_exprs.len() {
+                            return Err(Errors::RuntimeException(format!(
+                                "Incorrect number of arguments supplied to lambda expression"
+                            )));
+                        }
+
+                        // Push a new env first.
+                        self.env.push_front(HashMap::new());
+                        for (arg_index, arg_expr) in args_exprs.iter().enumerate() {
+                            self.stack.push(arg_expr.clone());
+                            let evaluated_arg_expr = Rc::new(RefCell::new(self.eval_recursive()?));
+                            self.define_symbol(
+                                lambda_args[arg_index].as_str(),
+                                evaluated_arg_expr,
+                            )?;
+                        }
+
+                        self.stack.push(lambda_body.clone());
+                        return self.eval_recursive();
                     }
                     ref o => {
                         return Err(Errors::RuntimeException(format!(
@@ -125,32 +177,14 @@ impl Machine {
 
                     let evaluated_val = Rc::new(RefCell::new(self.eval_recursive()?));
 
-                    match self.env.get_mut(symbol_name.as_str()) {
-                        Some(list) => {
-                            list.push_back(evaluated_val);
-                        }
-                        None => {
-                            let mut list = LinkedList::new();
-                            list.push_back(evaluated_val);
-                            self.env.insert(symbol_name.clone(), list);
-                        }
-                    }
+                    self.define_symbol(symbol_name.as_str(), evaluated_val)?;
 
                     return Ok(Object::Nil);
                 }
-                Object::Symbol(ref symbol_name) => match self.resolve_symbol(&symbol_name.as_str())
-                {
-                    Some(expr) => {
-                        curr_expr = expr;
-                        continue;
-                    }
-                    None => {
-                        return Err(Errors::RuntimeException(format!(
-                            "Cannot resolve symbol '{}'",
-                            symbol_name.as_str()
-                        )))
-                    }
-                },
+                Object::Symbol(ref symbol_name) => {
+                    curr_expr = self.resolve_symbol(&symbol_name.as_str())?;
+                    continue;
+                }
                 Object::If(ref cond, ref then, ref otherwise) => {
                     self.stack.push(cond.clone());
                     match self.eval_recursive()? {
@@ -169,6 +203,7 @@ impl Machine {
                         }
                     }
                 }
+
                 atom @ Object::Int(_)
                 | atom @ Object::Bool(_)
                 | atom @ Object::Char(_, _)
@@ -182,6 +217,8 @@ impl Machine {
     fn eval(&mut self, expr: Object) -> Result<Object, Errors> {
         let expanded_expr = self.expand_macros(expr)?;
 
+        // Set up a new env.
+        self.env.push_front(HashMap::new());
         self.stack
             .push(Rc::new(RefCell::new(/* expr */ expanded_expr)));
 
@@ -279,9 +316,9 @@ mod tests {
         assert_eq!(m.stack.len(), 0);
         assert!(m
             .env
-            .get("foo")
+            .front()
             .unwrap()
-            .back()
+            .get("foo")
             .unwrap()
             .borrow()
             .eq(&Object::Int(1)));
@@ -298,5 +335,19 @@ mod tests {
             Object::Int(3)
         );
         assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(define foo (lambda (a b) #f)) (foo 2 3)").unwrap())
+                .unwrap(),
+            Object::Bool(false)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        // assert_eq!(
+        //     m.eval(parse_program("((lambda (a b) #f) 2 3)").unwrap())
+        //         .unwrap(),
+        //     Object::Bool(false)
+        // );
+        // assert_eq!(m.stack.len(), 0);
     }
 }
