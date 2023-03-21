@@ -131,7 +131,7 @@ impl Machine {
                         }
                     }
                     Object::Lambda(ref lambda_args, ref lambda_body) => {
-                        // Lambda expression is callable.
+                        // Lambda expression is callable and it will be evaluated here.
                         let args_exprs = Object::cons_to_vec(cdr.clone())?;
                         if lambda_args.len() != args_exprs.len() {
                             return Err(Errors::RuntimeException(format!(
@@ -210,7 +210,6 @@ impl Machine {
                         }
                     }
                 }
-
                 atom @ Object::Int(_)
                 | atom @ Object::Bool(_)
                 | atom @ Object::Char(_, _)
@@ -229,7 +228,18 @@ impl Machine {
         self.stack
             .push(Rc::new(RefCell::new(/* expr */ expanded_expr)));
 
-        self.eval_recursive()
+        let result = self.eval_recursive()?;
+
+        // FIXME: Is this correct?
+        while self.env.front().is_some() {
+            if self.env.front().unwrap().is_empty() {
+                self.env.pop_front();
+                continue;
+            }
+            break;
+        }
+
+        Ok(result)
     }
 }
 
@@ -356,5 +366,14 @@ mod tests {
             Object::Bool(false)
         );
         assert_eq!(m.stack.len(), 0);
+        assert_eq!(m.env.len(), 2);
+
+        assert_eq!(
+            m.eval(parse_program("(define foo #f) foo").unwrap())
+                .unwrap(),
+            Object::Bool(false)
+        );
+        assert_eq!(m.stack.len(), 0);
+        assert_eq!(m.env.len(), 3);
     }
 }

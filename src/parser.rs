@@ -1,7 +1,3 @@
-use std::cell::RefCell;
-use std::convert::TryInto;
-use std::rc::Rc;
-
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
@@ -291,22 +287,12 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
         result = Object::make_cons(result, Object::Nil);
 
         while token_cursor < token_len {
-            let curr_token = tokens[token_cursor];
-
-            match curr_token.kind() {
-                TokenKind::LeftParen => match parse_object_recursive(tokens, &mut token_cursor) {
-                    Ok(object) => {
-                        result = Object::make_cons(object, result);
-                    }
-                    Err(e) => {
-                        return Err(e);
-                    }
-                },
-                _ => {
-                    return Err(Errors::UnexpectedToken(
-                        curr_token.line(),
-                        curr_token.column(),
-                    ));
+            match parse_object_recursive(tokens, &mut token_cursor) {
+                Ok(object) => {
+                    result = Object::make_cons(object, result);
+                }
+                Err(e) => {
+                    return Err(e);
                 }
             }
         }
@@ -475,6 +461,21 @@ mod tests {
             Object::make_begin(Object::make_cons(
                 Object::Nil,
                 Object::make_cons(Object::Nil, Object::Nil)
+            ))
+        );
+
+        assert_eq!(parse_program("1").unwrap(), Object::Int(1));
+        assert_eq!(
+            parse_program("(define foo 1) foo").unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::make_cons(
+                    Object::Symbol(String::from("define")),
+                    Object::make_cons(
+                        Object::Symbol(String::from("foo")),
+                        Object::make_cons(Object::Int(1), Object::Nil)
+                    )
+                ),
+                Object::make_cons(Object::Symbol(String::from("foo")), Object::Nil)
             ))
         );
     }

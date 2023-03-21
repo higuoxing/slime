@@ -654,5 +654,17 @@ foo
                 Token::new(")", 1, 74, TokenKind::RightParen)
             ])
         );
+
+        assert_eq!(
+            Tokenizer::tokenize("(define foo 1) foo"),
+            Ok(vec![
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("define", 1, 2, TokenKind::Symbol),
+                Token::new("foo", 1, 9, TokenKind::Symbol),
+                Token::new("1", 1, 13, TokenKind::Int),
+                Token::new(")", 1, 14, TokenKind::RightParen),
+                Token::new("foo", 1, 16, TokenKind::Symbol),
+            ])
+        );
     }
 }
