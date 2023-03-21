@@ -55,167 +55,302 @@ impl Machine {
         }
     }
 
+    // Evaluate the condition expression and returns the 'then' clause
+    // or the 'else' clause.
+    fn eval_if_expr(
+        &mut self,
+        cond: Rc<RefCell<Object>>,
+        then: Rc<RefCell<Object>>,
+        otherwise: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        self.stack.push(cond);
+        match self.eval_recursive()? {
+            Object::Bool(cond_result) => {
+                if !cond_result {
+                    Ok((Object::Nil, Some(otherwise.clone())))
+                } else {
+                    Ok((Object::Nil, Some(then.clone())))
+                }
+            }
+            // Any expression that cannot be evaluated to be #f is #t.
+            _ => Ok((Object::Nil, Some(then.clone()))),
+        }
+    }
+
+    // Evaluate a sequence of expressions and return the result of the last expression.
+    // (begin E1 E2 E3 ...)
+    fn eval_seq_expr(
+        &mut self,
+        seq_expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        let mut result = Object::Nil;
+        let exprs = Object::cons_to_vec(seq_expr)?;
+        for expr in exprs {
+            // Evaluate (begin E1 E2 E3 ...) sequentially.
+            self.stack.push(expr);
+            result = self.eval_recursive()?;
+        }
+
+        Ok((result, None))
+    }
+
+    // Evaluate the 'define' expr and add the symbol to the current environment.
+    fn eval_define_expr(
+        &mut self,
+        symbol_name: &str,
+        expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        self.stack.push(expr);
+        let evaluated = Rc::new(RefCell::new(self.eval_recursive()?));
+        self.define_symbol(symbol_name, evaluated)?;
+
+        Ok((Object::Nil, None))
+    }
+
+    fn eval_callable_symbol(
+        &mut self,
+        symbol_name: &str,
+        expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        match symbol_name.to_uppercase().as_str() {
+            // Build premitives.
+            "BEGIN" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(Object::Begin(expr)))),
+            )),
+            "DEFINE" => {
+                let define_body = Object::cons_to_vec(expr)?;
+                if define_body.len() != 2 || !define_body[0].borrow().is_symbol() {
+                    return Err(Errors::RuntimeException(format!(
+                        "'DEFINE' should be followed by a symbol and an expression"
+                    )));
+                }
+
+                let sym = define_body[0].borrow().symbol_name();
+                Ok((
+                    Object::Nil,
+                    Some(Rc::new(RefCell::new(Object::Define(
+                        sym,
+                        define_body[1].clone(),
+                    )))),
+                ))
+            }
+            "IF" => {
+                let if_body = Object::cons_to_vec(expr.clone())?;
+
+                if if_body.len() != 3 {
+                    return Err(Errors::RuntimeException(format!("'IF' should be followed by a condition clause, a then clause and a else clause")));
+                }
+
+                Ok((
+                    Object::Nil,
+                    Some(Rc::new(RefCell::new(Object::If(
+                        if_body[0].clone(),
+                        if_body[1].clone(),
+                        if_body[2].clone(),
+                    )))),
+                ))
+            }
+            "LAMBDA" => {
+                let lambda_body = Object::cons_to_vec(expr.clone())?;
+                if lambda_body.len() != 2 {
+                    return Err(Errors::RuntimeException(format!(
+                        "'LAMBDA' should be followed by a list of arguments and a function body"
+                    )));
+                }
+
+                let lambda_args = Object::cons_to_vec(lambda_body[0].clone())?;
+                let mut args_names = vec![];
+
+                for arg in lambda_args {
+                    if !arg.borrow().is_symbol() {
+                        return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
+                    }
+
+                    args_names.push(arg.borrow().symbol_name());
+                }
+
+                Ok((
+                    Object::Nil,
+                    Some(Rc::new(RefCell::new(Object::Lambda(
+                        args_names,
+                        lambda_body[1].clone(),
+                    )))),
+                ))
+            }
+            _ => {
+                // Try to evaluate sym.
+                // FIXME: This is not perfect ... but it works ...
+                // Try to improve it tomorrow!
+                let resolved_symbol = self.resolve_symbol(symbol_name)?;
+                self.stack.push(resolved_symbol);
+                let evaluated = self.eval_recursive()?;
+                Ok((
+                    Object::Nil,
+                    Some(Rc::new(RefCell::new(Object::Cons(
+                        Rc::new(RefCell::new(evaluated)),
+                        expr.clone(),
+                    )))),
+                ))
+            }
+        }
+    }
+
+    fn eval_lambda_expr(
+        &mut self,
+        lambda_args: &Vec<String>,
+        lambda_expr: Rc<RefCell<Object>>,
+        passed_args: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        let passed_args_vec = Object::cons_to_vec(passed_args.clone())?;
+        if lambda_args.len() != passed_args_vec.len() {
+            return Err(Errors::RuntimeException(format!(
+                "Incorrect number of arguments supplied to lambda expression, expected: {}, provided: {}"
+            , lambda_args.len(), passed_args_vec.len())));
+        }
+
+        // Push a new env first.
+        self.env.push_front(HashMap::new());
+
+        // Pass arguments by env.
+        for arg_index in 0..lambda_args.len() {
+            self.stack.push(passed_args_vec[arg_index].clone());
+            let evaluated = self.eval_recursive()?;
+            self.define_symbol(
+                lambda_args[arg_index].as_str(),
+                Rc::new(RefCell::new(evaluated)),
+            )?;
+        }
+
+        self.stack.push(lambda_expr.clone());
+        let result = self.eval_recursive()?;
+
+        // Pop the env since we use it to pass arguments to the lambda expression,
+        // and we should clean it up.
+        self.env.pop_front();
+
+        Ok((result, None))
+    }
+
+    fn eval_cons_expr(
+        &mut self,
+        car: Rc<RefCell<Object>>,
+        cdr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        match &*car.clone().borrow() {
+            Object::Symbol(ref symbol_name) => {
+                // Apply symbol against cdr.
+                self.eval_callable_symbol(symbol_name.as_str(), cdr)
+            }
+            Object::Lambda(ref args, ref expr) => {
+                // Apply lambda expression against 'cdr'.
+                self.eval_lambda_expr(args, expr.clone(), cdr.clone())
+            }
+            Object::Cons(_, _) => {
+                // The 'car' expression maybe callable, let's evaluate it and try to apply
+                // it against 'cdr'.
+                self.stack.push(car.clone());
+                let evaluated = self.eval_recursive()?;
+                Ok((
+                    Object::Nil,
+                    Some(Rc::new(RefCell::new(Object::Cons(
+                        Rc::new(RefCell::new(evaluated)),
+                        cdr.clone(),
+                    )))),
+                ))
+            }
+            ref o => Err(Errors::RuntimeException(format!(
+                "Object '{:?}' is not callable",
+                o
+            ))),
+        }
+    }
+
+    // Evaluate the current expression, dispatch the current expression to
+    // appropriate 'eval' function.
+    fn eval_current_expr(
+        &mut self,
+        curr_expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        match &*curr_expr.clone().borrow() {
+            Object::Begin(ref seq) => self.eval_seq_expr(seq.clone()),
+            Object::Cons(ref car, ref cdr) => self.eval_cons_expr(car.clone(), cdr.clone()),
+            Object::Define(ref symbol_name, ref expr) => {
+                self.eval_define_expr(symbol_name.as_str(), expr.clone())
+            }
+            Object::If(ref cond, ref then, ref otherwise) => {
+                self.eval_if_expr(cond.clone(), then.clone(), otherwise.clone())
+            }
+            Object::Symbol(ref symbol_name) => Ok((
+                Object::Nil,
+                Some(self.resolve_symbol(symbol_name.as_str())?),
+            )),
+            // For atomic expressions, just copy them and return.
+            atom @ Object::Int(_)
+            | atom @ Object::Bool(_)
+            | atom @ Object::Char(_, _)
+            | atom @ Object::Lambda(_, _)
+            | atom @ Object::Real(_)
+            | atom @ Object::Nil => return Ok((atom.clone(), None)),
+        }
+    }
+
+    // This function is the main entry for evaluating expressions and is called
+    // recursively. Before calling this function, an expression should be pushed
+    // into self.stack first.
     fn eval_recursive(&mut self) -> Result<Object, Errors> {
         let mut curr_expr = self.stack.pop().unwrap();
 
         loop {
-            match &*curr_expr.clone().borrow() {
-                Object::Cons(ref car, ref cdr) => match *car.clone().borrow() {
-                    Object::Symbol(ref sym) => {
-                        let callable_sym = sym.to_uppercase();
-                        match callable_sym.as_str() {
-                            // Firstly, try to process pre-defined symbols.
-                            "BEGIN" => {
-                                curr_expr = Rc::new(RefCell::new(Object::Begin(cdr.clone())));
-                                continue;
-                            }
-                            "DEFINE" => {
-                                let define_body = Object::cons_to_vec(cdr.clone())?;
-
-                                if define_body.len() != 2 || !define_body[0].borrow().is_symbol() {
-                                    return Err(Errors::RuntimeException(format!(
-                                        "'DEFINE' should be followed by a symbol and an expression"
-                                    )));
-                                }
-
-                                curr_expr = Rc::new(RefCell::new(Object::make_define(
-                                    define_body[0].borrow().symbol_name(),
-                                    define_body[1].take(),
-                                )));
-                                continue;
-                            }
-                            "IF" => {
-                                let if_body = Object::cons_to_vec(cdr.clone())?;
-
-                                if if_body.len() != 3 {
-                                    return Err(Errors::RuntimeException(format!("'IF' should be followed by a condition clause, a then clause and a else clause")));
-                                }
-                                curr_expr = Rc::new(RefCell::new(Object::make_if(
-                                    if_body[0].take(),
-                                    if_body[1].take(),
-                                    if_body[2].take(),
-                                )));
-                                continue;
-                            }
-                            "LAMBDA" => {
-                                let lambda_body = Object::cons_to_vec(cdr.clone())?;
-
-                                if lambda_body.len() != 2 {
-                                    return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
-                                }
-
-                                let args = Object::cons_to_vec(lambda_body[0].clone())?;
-                                let mut args_names = vec![];
-                                for arg in args {
-                                    /* Check argument list. */
-                                    if !arg.borrow().is_symbol() {
-                                        return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
-                                    }
-
-                                    args_names.push(arg.borrow().symbol_name());
-                                }
-
-                                return Ok(Object::Lambda(args_names, lambda_body[1].clone()));
-                            }
-                            _ => {
-                                // Try to evaluate sym.
-                                // FIXME: This is not perfect ... but it works ...
-                                // Try to improve it tomorrow!
-                                let resolved_sym = self.resolve_symbol(sym)?;
-                                self.stack.push(resolved_sym);
-                                let evaluated_sym = Rc::new(RefCell::new(self.eval_recursive()?));
-                                curr_expr =
-                                    Rc::new(RefCell::new(Object::Cons(evaluated_sym, cdr.clone())));
-                                continue;
-                            }
-                        }
-                    }
-                    Object::Lambda(ref lambda_args, ref lambda_body) => {
-                        // Lambda expression is callable and it will be evaluated here.
-                        let args_exprs = Object::cons_to_vec(cdr.clone())?;
-                        if lambda_args.len() != args_exprs.len() {
-                            return Err(Errors::RuntimeException(format!(
-                                "Incorrect number of arguments supplied to lambda expression"
-                            )));
-                        }
-
-                        // Push a new env first.
-                        self.env.push_front(HashMap::new());
-                        for (arg_index, arg_expr) in args_exprs.iter().enumerate() {
-                            self.stack.push(arg_expr.clone());
-                            let evaluated_arg_expr = Rc::new(RefCell::new(self.eval_recursive()?));
-                            self.define_symbol(
-                                lambda_args[arg_index].as_str(),
-                                evaluated_arg_expr,
-                            )?;
-                        }
-
-                        self.stack.push(lambda_body.clone());
-                        let result = self.eval_recursive()?;
-                        // Pop the env.
-                        self.env.pop_front();
-
-                        return Ok(result);
-                    }
-                    _ => {
-                        self.stack.push(car.clone());
-                        let call_expr = self.eval_recursive()?;
-                        curr_expr = Rc::new(RefCell::new(Object::Cons(
-                            Rc::new(RefCell::new(call_expr)),
-                            cdr.clone(),
-                        )));
-                        continue;
-                    }
-                },
-                Object::Begin(ref seq) => {
-                    let exprs = Object::cons_to_vec(seq.clone())?;
-                    let mut result = Object::Nil;
-
-                    for expr in exprs {
-                        // Evaluate (begin E1 E2 E3 ...) sequentially.
-                        self.stack.push(expr);
-                        result = self.eval_recursive()?;
-                    }
-
-                    return Ok(result);
-                }
-                Object::Define(ref symbol_name, ref val) => {
-                    self.stack.push(val.clone());
-
-                    let evaluated_val = Rc::new(RefCell::new(self.eval_recursive()?));
-
-                    self.define_symbol(symbol_name.as_str(), evaluated_val)?;
-
-                    return Ok(Object::Nil);
-                }
-                Object::Symbol(ref symbol_name) => {
-                    curr_expr = self.resolve_symbol(&symbol_name.as_str())?;
+            let result = self.eval_current_expr(curr_expr.clone())?;
+            match result.1 {
+                Some(next_expr) => {
+                    curr_expr = next_expr.clone();
                     continue;
                 }
-                Object::If(ref cond, ref then, ref otherwise) => {
-                    self.stack.push(cond.clone());
-                    match self.eval_recursive()? {
-                        Object::Bool(cond_result) => {
-                            if !cond_result {
-                                curr_expr = otherwise.clone();
-                            } else {
-                                curr_expr = then.clone();
-                            }
-                            continue;
-                        }
-                        _ => {
-                            // Any expression that cannot be evaluated to be #f is #t.
-                            curr_expr = then.clone();
-                            continue;
-                        }
-                    }
-                }
-                atom @ Object::Int(_)
-                | atom @ Object::Bool(_)
-                | atom @ Object::Char(_, _)
-                | atom @ Object::Lambda(_, _)
-                | atom @ Object::Real(_)
-                | atom @ Object::Nil => return Ok(atom.clone()),
+                None => return Ok(result.0),
             }
         }
     }
@@ -230,7 +365,8 @@ impl Machine {
 
         let result = self.eval_recursive()?;
 
-        // FIXME: Is this correct?
+        // FIXME: If there's no environment updates, we just drop the
+        // current environment, to save some space.
         while self.env.front().is_some() {
             if self.env.front().unwrap().is_empty() {
                 self.env.pop_front();
