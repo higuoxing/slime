@@ -151,13 +151,20 @@ impl Machine {
                         }
 
                         self.stack.push(lambda_body.clone());
-                        return self.eval_recursive();
+                        let result = self.eval_recursive()?;
+                        // Pop the env.
+                        self.env.pop_front();
+
+                        return Ok(result);
                     }
-                    ref o => {
-                        return Err(Errors::RuntimeException(format!(
-                            "The object '{:?}' is not applicable.",
-                            o
-                        )))
+                    _ => {
+                        self.stack.push(car.clone());
+                        let call_expr = self.eval_recursive()?;
+                        curr_expr = Rc::new(RefCell::new(Object::Cons(
+                            Rc::new(RefCell::new(call_expr)),
+                            cdr.clone(),
+                        )));
+                        continue;
                     }
                 },
                 Object::Begin(ref seq) => {
@@ -343,11 +350,11 @@ mod tests {
         );
         assert_eq!(m.stack.len(), 0);
 
-        // assert_eq!(
-        //     m.eval(parse_program("((lambda (a b) #f) 2 3)").unwrap())
-        //         .unwrap(),
-        //     Object::Bool(false)
-        // );
-        // assert_eq!(m.stack.len(), 0);
+        assert_eq!(
+            m.eval(parse_program("((lambda (a b) #f) 2 3)").unwrap())
+                .unwrap(),
+            Object::Bool(false)
+        );
+        assert_eq!(m.stack.len(), 0);
     }
 }
