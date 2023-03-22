@@ -115,7 +115,7 @@ fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
-    prelude: HashMap<String, Box<BuiltinFunc>>,
+    prelude: HashMap<String, Rc<BuiltinFunc>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
@@ -290,22 +290,6 @@ impl Machine {
                     )),
                     Err(_) => {
                         // Cannot resolve the symbol, is it a builtin function?
-                        if self.prelude.contains_key(symbol_name) {
-                            let mut tail = Object::Nil;
-                            let args = Object::cons_to_vec(expr)?;
-                            for arg in args.iter() {
-                                self.stack.push(arg.clone());
-                                let evaluated_arg = self.eval_recursive()?;
-                                tail = Object::make_cons(evaluated_arg, tail);
-                            }
-
-                            let builtin_func = self.prelude.get(symbol_name).unwrap();
-                            return Ok((
-                                builtin_func(Rc::new(RefCell::new(Object::reverse_list(tail))))?,
-                                None,
-                            ));
-                        }
-
                         return Err(Errors::RuntimeException(format!(
                             "Cannot resolve symbol {}",
                             symbol_name
@@ -358,6 +342,31 @@ impl Machine {
         Ok((result, None))
     }
 
+    fn eval_builtin_func(
+        &mut self,
+        builtin_func: Rc<BuiltinFunc>,
+        expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        let args = Object::cons_to_vec(expr)?;
+        let mut tail = Object::Nil;
+        for arg in args.iter() {
+            self.stack.push(arg.clone());
+            let evaluated_arg = self.eval_recursive()?;
+            tail = Object::make_cons(evaluated_arg, tail);
+        }
+
+        Ok((
+            builtin_func(Rc::new(RefCell::new(Object::reverse_list(tail))))?,
+            None,
+        ))
+    }
+
     fn eval_cons_expr(
         &mut self,
         car: Rc<RefCell<Object>>,
@@ -391,7 +400,9 @@ impl Machine {
                     )))),
                 ))
             }
-            Object::BuiltinFunc(ref builtin_func) => Ok((builtin_func(cdr.clone())?, None)),
+            Object::BuiltinFunc(ref builtin_func) => {
+                self.eval_builtin_func(builtin_func.clone(), cdr.clone())
+            }
             ref o => Err(Errors::RuntimeException(format!(
                 "Object '{:?}' is not callable",
                 o

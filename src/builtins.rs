@@ -7,11 +7,11 @@ use crate::object::Object;
 
 pub type BuiltinFunc = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
-pub fn make_prelude_env() -> HashMap<String, Box<BuiltinFunc>> {
+pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFunc>> {
     let mut builtins = HashMap::new();
 
-    builtins.insert(String::from("cons"), Box::new(builtin_cons as BuiltinFunc));
-    builtins.insert(String::from("+"), Box::new(builtin_plus as BuiltinFunc));
+    builtins.insert(String::from("cons"), Rc::new(builtin_cons as BuiltinFunc));
+    builtins.insert(String::from("+"), Rc::new(builtin_plus as BuiltinFunc));
 
     builtins
 }

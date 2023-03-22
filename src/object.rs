@@ -35,7 +35,7 @@ pub enum Object {
         /* arguments */ Vec<String>,
         /* lambda body */ Rc<RefCell<Object>>,
     ),
-    BuiltinFunc(Box<BuiltinFunc>),
+    BuiltinFunc(/* Function prototype */ Rc<BuiltinFunc>),
 }
 
 impl Object {
