@@ -7,14 +7,18 @@ use crate::object::Object;
 
 pub type BuiltinFuncSig = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
-pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFuncSig>> {
-    let mut builtins = HashMap::new();
+const BUILTIN_FUNCTIONS: &[(&str, BuiltinFuncSig)] = &[
+    ("cons", builtin_cons as BuiltinFuncSig),
+    ("+", builtin_plus as BuiltinFuncSig),
+];
 
-    builtins.insert(
-        String::from("cons"),
-        Rc::new(builtin_cons as BuiltinFuncSig),
-    );
-    builtins.insert(String::from("+"), Rc::new(builtin_plus as BuiltinFuncSig));
+pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFuncSig>> {
+    let mut builtins: HashMap<String, Rc<BuiltinFuncSig>> = HashMap::new();
+
+    // Initialize the builtin function table.
+    for (fun_name, fun_impl) in BUILTIN_FUNCTIONS {
+        builtins.insert(fun_name.to_string(), Rc::new(*fun_impl));
+    }
 
     builtins
 }
