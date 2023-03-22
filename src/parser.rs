@@ -276,6 +276,13 @@ fn parse_object_recursive<'a>(
         TokenKind::Symbol => Ok(parse_symbol(tokens, token_cursor)?),
         TokenKind::Char => Ok(parse_char(tokens, token_cursor)?),
         TokenKind::String => Ok(parse_string(tokens, token_cursor)?),
+        TokenKind::Quote => {
+            *token_cursor += 1;
+            Ok(Object::make_quote(parse_object_recursive(
+                tokens,
+                token_cursor,
+            )?))
+        }
         _ => {
             panic!("Not implemented!");
         }
@@ -483,6 +490,17 @@ mod tests {
                 ),
                 Object::make_cons(Object::Symbol(String::from("foo")), Object::Nil)
             ))
+        );
+
+        assert_eq!(
+            parse_program("'(define foo 1)").unwrap(),
+            Object::make_quote(Object::make_cons(
+                Object::Symbol(String::from("define")),
+                Object::make_cons(
+                    Object::Symbol(String::from("foo")),
+                    Object::make_cons(Object::Int(1), Object::Nil)
+                )
+            ),)
         );
     }
 }

@@ -103,6 +103,15 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     Ok(Object::Lambda(args_names, lambda_body[1].clone()))
 }
 
+// Construct the 'quote' expression.
+fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(expr)?;
+    if args.len() != 1 {
+        return Err(Errors::RuntimeException(format!("Ill-formed syntax")));
+    }
+    Ok(Object::Quote(args[0].clone()))
+}
+
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
@@ -259,6 +268,10 @@ impl Machine {
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
             )),
+            "QUOTE" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_quote_expr(expr)?))),
+            )),
             _ => {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
@@ -406,6 +419,7 @@ impl Machine {
                 Object::Nil,
                 Some(self.resolve_symbol(symbol_name.as_str())?),
             )),
+            Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
@@ -588,6 +602,18 @@ mod tests {
         assert_eq!(
             m.eval(parse_program("(+ 1 2 3 4 5)").unwrap()).unwrap(),
             Object::Int(15)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(quote a)").unwrap()).unwrap(),
+            Object::Symbol(String::from("a"))
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("'a").unwrap()).unwrap(),
+            Object::Symbol(String::from("a"))
         );
         assert_eq!(m.stack.len(), 0);
     }

@@ -21,6 +21,7 @@ pub enum Object {
         /* car */ Rc<RefCell<Object>>,
         /* cdr */ Rc<RefCell<Object>>,
     ),
+    Quote(Rc<RefCell<Object>>),
     // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
     If(
@@ -42,6 +43,10 @@ impl Object {
 
     pub fn make_begin(object: Object) -> Object {
         Object::Begin(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_quote(object: Object) -> Object {
+        Object::Quote(Rc::new(RefCell::new(object)))
     }
 
     pub fn is_cons(&self) -> bool {
