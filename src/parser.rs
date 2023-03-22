@@ -168,18 +168,6 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
     }
 }
 
-fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
-    while let Object::Cons(car, cdr) = list {
-        tail = Object::make_cons(car.take(), tail);
-        list = cdr.take();
-    }
-    tail
-}
-
-fn reverse_list(mut list: Object) -> Object {
-    reverse_list_with_tail(list, Object::Nil)
-}
-
 fn parse_object_recursive<'a>(
     tokens: &Vec<Token<'a>>,
     token_cursor: &mut usize,
@@ -235,7 +223,7 @@ fn parse_object_recursive<'a>(
                 if curr_token.kind() != TokenKind::RightParen {
                     match parse_object_recursive(tokens, token_cursor) {
                         Ok(object) => {
-                            tail = reverse_list_with_tail(tail, object);
+                            tail = Object::reverse_list_with_tail(tail, object);
 
                             // The cursor is incremented in parse_object_recursive(), we should
                             // check the bound and update the curr_token.
@@ -251,7 +239,7 @@ fn parse_object_recursive<'a>(
                     }
                 }
             } else {
-                tail = reverse_list(tail);
+                tail = Object::reverse_list(tail);
             }
 
             if curr_token.kind() != TokenKind::RightParen {
@@ -300,7 +288,7 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
         // Insert a BEGIN symbol if we have multiple expressions.
         // See: 4.2.3  Sequencing
         // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-        result = Object::make_begin(reverse_list(result));
+        result = Object::make_begin(Object::reverse_list(result));
     }
 
     Ok(result)

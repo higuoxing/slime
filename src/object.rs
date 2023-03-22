@@ -77,6 +77,13 @@ impl Object {
         }
     }
 
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            Object::Int(_) | Object::Real(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn symbol_name(&self) -> String {
         match self {
             Object::Symbol(sym) => sym.clone(),
@@ -99,6 +106,18 @@ impl Object {
 
             Ok(result)
         }
+    }
+
+    pub fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
+        while let Object::Cons(car, cdr) = list {
+            tail = Object::make_cons(car.take(), tail);
+            list = cdr.take();
+        }
+        tail
+    }
+
+    pub fn reverse_list(mut list: Object) -> Object {
+        Self::reverse_list_with_tail(list, Object::Nil)
     }
 }
 

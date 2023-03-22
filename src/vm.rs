@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
+use crate::builtins::{make_prelude_env, BuiltinFunc};
 use crate::error::Errors;
 use crate::object::Object;
 
@@ -105,6 +106,7 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
+    prelude: HashMap<String, BuiltinFunc>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
@@ -116,6 +118,7 @@ impl Machine {
 
         Self {
             env: env_list,
+            prelude: make_prelude_env(),
             stack: vec![],
         }
     }
@@ -259,16 +262,38 @@ impl Machine {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
                 // Try to improve it tomorrow!
-                let resolved_symbol = self.resolve_symbol(symbol_name)?;
-                self.stack.push(resolved_symbol);
-                let evaluated = self.eval_recursive()?;
-                Ok((
-                    Object::Nil,
-                    Some(Rc::new(RefCell::new(Object::Cons(
-                        Rc::new(RefCell::new(evaluated)),
-                        expr.clone(),
-                    )))),
-                ))
+                match self.resolve_symbol(symbol_name) {
+                    Ok(resolved_symbol) => Ok((
+                        Object::Nil,
+                        Some(Rc::new(RefCell::new(Object::Cons(
+                            resolved_symbol,
+                            expr.clone(),
+                        )))),
+                    )),
+                    Err(_) => {
+                        // Cannot resolve the symbol, is it a builtin function?
+                        if self.prelude.contains_key(symbol_name) {
+                            let mut tail = Object::Nil;
+                            let args = Object::cons_to_vec(expr)?;
+                            for arg in args.iter() {
+                                self.stack.push(arg.clone());
+                                let evaluated_arg = self.eval_recursive()?;
+                                tail = Object::make_cons(evaluated_arg, tail);
+                            }
+
+                            let builtin_func = self.prelude.get(symbol_name).unwrap();
+                            return Ok((
+                                builtin_func(Rc::new(RefCell::new(Object::reverse_list(tail))))?,
+                                None,
+                            ));
+                        }
+
+                        return Err(Errors::RuntimeException(format!(
+                            "Cannot resolve symbol {}",
+                            symbol_name
+                        )));
+                    }
+                }
             }
         }
     }
@@ -555,6 +580,12 @@ mod tests {
             m.eval(parse_program("(define (foo) #f) (foo)").unwrap())
                 .unwrap(),
             Object::Bool(false)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(+ 1 2 3 4 5)").unwrap()).unwrap(),
+            Object::Int(15)
         );
         assert_eq!(m.stack.len(), 0);
     }
