@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, LinkedList};
 use std::rc::Rc;
 
-use crate::builtins::{make_prelude_env, BuiltinFunc};
+use crate::builtins::{make_prelude_env, BuiltinFuncSig};
 use crate::error::Errors;
 use crate::object::Object;
 
@@ -52,7 +52,10 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         }
         // Construct a lambda expression.
         let fun_name = fun_name_with_args[0].borrow().symbol_name();
-        let lambda_expr = Object::Lambda(args, define_body[1].clone());
+        let lambda_expr = Object::Lambda {
+            lambda_args: args,
+            lambda_body: define_body[1].clone(),
+        };
         Ok(Object::Define(fun_name, Rc::new(RefCell::new(lambda_expr))))
     } else {
         Err(Errors::RuntimeException(format!(
@@ -71,11 +74,11 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         )));
     }
 
-    Ok(Object::If(
-        if_body[0].clone(),
-        if_body[1].clone(),
-        if_body[2].clone(),
-    ))
+    Ok(Object::If {
+        condition: if_body[0].clone(),
+        then: if_body[1].clone(),
+        otherwise: if_body[2].clone(),
+    })
 }
 
 // Construct the 'lambda' expression from a expr.
@@ -100,7 +103,10 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         args_names.push(arg.borrow().symbol_name());
     }
 
-    Ok(Object::Lambda(args_names, lambda_body[1].clone()))
+    Ok(Object::Lambda {
+        lambda_args: args_names,
+        lambda_body: lambda_body[1].clone(),
+    })
 }
 
 // Construct the 'quote' expression.
@@ -115,7 +121,7 @@ fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
-    prelude: HashMap<String, Rc<BuiltinFunc>>,
+    prelude: HashMap<String, Rc<BuiltinFuncSig>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
@@ -283,10 +289,10 @@ impl Machine {
                 match self.resolve_symbol(symbol_name) {
                     Ok(resolved_symbol) => Ok((
                         Object::Nil,
-                        Some(Rc::new(RefCell::new(Object::Cons(
-                            resolved_symbol,
-                            expr.clone(),
-                        )))),
+                        Some(Rc::new(RefCell::new(Object::Cons {
+                            car: resolved_symbol,
+                            cdr: expr.clone(),
+                        }))),
                     )),
                     Err(_) => {
                         // Cannot resolve the symbol, is it a builtin function?
@@ -344,7 +350,7 @@ impl Machine {
 
     fn eval_builtin_func(
         &mut self,
-        builtin_func: Rc<BuiltinFunc>,
+        builtin_func: Rc<BuiltinFuncSig>,
         expr: Rc<RefCell<Object>>,
     ) -> Result<
         (
@@ -383,21 +389,24 @@ impl Machine {
                 // Apply symbol against cdr.
                 self.eval_callable_symbol(symbol_name.as_str(), cdr)
             }
-            Object::Lambda(ref args, ref expr) => {
+            Object::Lambda {
+                ref lambda_args,
+                ref lambda_body,
+            } => {
                 // Apply lambda expression against 'cdr'.
-                self.eval_lambda_expr(args, expr.clone(), cdr.clone())
+                self.eval_lambda_expr(lambda_args, lambda_body.clone(), cdr.clone())
             }
-            Object::Cons(_, _) => {
+            Object::Cons { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
                 // it against 'cdr'.
                 self.stack.push(car.clone());
                 let evaluated = self.eval_recursive()?;
                 Ok((
                     Object::Nil,
-                    Some(Rc::new(RefCell::new(Object::Cons(
-                        Rc::new(RefCell::new(evaluated)),
-                        cdr.clone(),
-                    )))),
+                    Some(Rc::new(RefCell::new(Object::Cons {
+                        car: Rc::new(RefCell::new(evaluated)),
+                        cdr: cdr.clone(),
+                    }))),
                 ))
             }
             Object::BuiltinFunc(ref builtin_func) => {
@@ -424,13 +433,15 @@ impl Machine {
     > {
         match &*curr_expr.clone().borrow() {
             Object::Begin(ref seq) => self.eval_seq_expr(seq.clone()),
-            Object::Cons(ref car, ref cdr) => self.eval_cons_expr(car.clone(), cdr.clone()),
+            Object::Cons { ref car, ref cdr } => self.eval_cons_expr(car.clone(), cdr.clone()),
             Object::Define(ref symbol_name, ref expr) => {
                 self.eval_define_expr(symbol_name.as_str(), expr.clone())
             }
-            Object::If(ref cond, ref then, ref otherwise) => {
-                self.eval_if_expr(cond.clone(), then.clone(), otherwise.clone())
-            }
+            Object::If {
+                ref condition,
+                ref then,
+                ref otherwise,
+            } => self.eval_if_expr(condition.clone(), then.clone(), otherwise.clone()),
             Object::Symbol(ref symbol_name) => Ok((
                 Object::Nil,
                 Some(self.resolve_symbol(symbol_name.as_str())?),
@@ -439,9 +450,9 @@ impl Machine {
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
-            | atom @ Object::Char(_, _)
+            | atom @ Object::Char { .. }
             | atom @ Object::String(_)
-            | atom @ Object::Lambda(_, _)
+            | atom @ Object::Lambda { .. }
             | atom @ Object::Real(_)
             | atom @ Object::BuiltinFunc(_)
             | atom @ Object::Nil => return Ok((atom.clone(), None)),
@@ -638,6 +649,19 @@ mod tests {
             m.eval(parse_program("((if #f + cons) 3 4)").unwrap())
                 .unwrap(),
             Object::make_cons(Object::Int(3), Object::Int(4))
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        // Some examples from https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_6.html
+        assert_eq!(
+            m.eval(parse_program("(quote (+ 1 2))").unwrap()).unwrap(),
+            Object::make_cons(
+                Object::Symbol(String::from("+")),
+                Object::make_cons(
+                    Object::Int(1),
+                    Object::make_cons(Object::Int(2), Object::Nil)
+                )
+            )
         );
         assert_eq!(m.stack.len(), 0);
     }

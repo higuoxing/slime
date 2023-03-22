@@ -1,4 +1,4 @@
-use crate::builtins::BuiltinFunc;
+use crate::builtins::BuiltinFuncSig;
 use crate::error::Errors;
 
 use std::cell::RefCell;
@@ -15,32 +15,38 @@ pub enum Object {
     Bool(bool),
     // An MIT Scheme character consists of a code part and a bucky bits part.
     // See: https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
-    Char(/* code part */ u32, /* bucky bits part */ u32),
+    Char {
+        char_code: u32,
+        bucky_bits: u32,
+    },
     String(String),
     Symbol(String),
-    Cons(
-        /* car */ Rc<RefCell<Object>>,
-        /* cdr */ Rc<RefCell<Object>>,
-    ),
+    Cons {
+        car: Rc<RefCell<Object>>,
+        cdr: Rc<RefCell<Object>>,
+    },
     Quote(Rc<RefCell<Object>>),
     // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
-    If(
-        /* condition */ Rc<RefCell<Object>>,
-        /* then */ Rc<RefCell<Object>>,
-        /* else */ Rc<RefCell<Object>>,
-    ),
+    If {
+        condition: Rc<RefCell<Object>>,
+        then: Rc<RefCell<Object>>,
+        otherwise: Rc<RefCell<Object>>,
+    },
     Define(String, Rc<RefCell<Object>>),
-    Lambda(
-        /* arguments */ Vec<String>,
-        /* lambda body */ Rc<RefCell<Object>>,
-    ),
-    BuiltinFunc(/* Function prototype */ Rc<BuiltinFunc>),
+    Lambda {
+        lambda_args: Vec<String>,
+        lambda_body: Rc<RefCell<Object>>,
+    },
+    BuiltinFunc(/* Function prototype */ Rc<BuiltinFuncSig>),
 }
 
 impl Object {
     pub fn make_cons(car: Object, cdr: Object) -> Object {
-        Object::Cons(Rc::new(RefCell::new(car)), Rc::new(RefCell::new(cdr)))
+        Object::Cons {
+            car: Rc::new(RefCell::new(car)),
+            cdr: Rc::new(RefCell::new(cdr)),
+        }
     }
 
     pub fn make_begin(object: Object) -> Object {
@@ -51,9 +57,16 @@ impl Object {
         Object::Quote(Rc::new(RefCell::new(object)))
     }
 
+    pub fn make_char(char_code: u32, bucky_bits: u32) -> Object {
+        Object::Char {
+            char_code,
+            bucky_bits,
+        }
+    }
+
     pub fn is_cons(&self) -> bool {
         match self {
-            Object::Cons(_, _) => true,
+            Object::Cons { .. } => true,
             _ => false,
         }
     }
@@ -87,7 +100,7 @@ impl Object {
         } else {
             let mut result = vec![];
 
-            while let Object::Cons(ref car, ref cdr) = *cons.clone().borrow() {
+            while let Object::Cons { ref car, ref cdr } = *cons.clone().borrow() {
                 result.push(car.clone());
                 cons = cdr.clone();
             }
@@ -97,7 +110,7 @@ impl Object {
     }
 
     pub fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
-        while let Object::Cons(car, cdr) = list {
+        while let Object::Cons { car, cdr } = list {
             tail = Object::make_cons(car.take(), tail);
             list = cdr.take();
         }

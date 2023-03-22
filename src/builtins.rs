@@ -5,13 +5,16 @@ use std::rc::Rc;
 use crate::error::Errors;
 use crate::object::Object;
 
-pub type BuiltinFunc = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
+pub type BuiltinFuncSig = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
-pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFunc>> {
+pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFuncSig>> {
     let mut builtins = HashMap::new();
 
-    builtins.insert(String::from("cons"), Rc::new(builtin_cons as BuiltinFunc));
-    builtins.insert(String::from("+"), Rc::new(builtin_plus as BuiltinFunc));
+    builtins.insert(
+        String::from("cons"),
+        Rc::new(builtin_cons as BuiltinFuncSig),
+    );
+    builtins.insert(String::from("+"), Rc::new(builtin_plus as BuiltinFuncSig));
 
     builtins
 }
@@ -23,7 +26,10 @@ fn builtin_cons(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
             "CONS expects 2 arguments"
         )));
     }
-    Ok(Object::Cons(args[0].clone(), args[1].clone()))
+    Ok(Object::Cons {
+        car: args[0].clone(),
+        cdr: args[1].clone(),
+    })
 }
 
 fn builtin_plus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {

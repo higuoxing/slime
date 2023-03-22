@@ -159,7 +159,10 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
             }
 
             *token_cursor += 1;
-            return Ok(Object::Char(char_code, bucky_bits));
+            return Ok(Object::Char {
+                char_code,
+                bucky_bits,
+            });
         }
         _ => Err(Errors::UnexpectedToken(
             curr_token.line(),
@@ -440,24 +443,27 @@ mod tests {
             )
             .unwrap(),
             Object::make_cons(
-                Object::Char(97, 0),
+                Object::make_char(97, 0),
                 Object::make_cons(
-                    Object::Char(98, 0),
+                    Object::make_char(98, 0),
                     Object::make_cons(
-                        Object::Char(99, 0),
+                        Object::make_char(99, 0),
                         Object::make_cons(
-                            Object::Char(32, 0),
+                            Object::make_char(32, 0),
                             Object::make_cons(
-                                Object::Char(97, 2),
+                                Object::make_char(97, 2),
                                 Object::make_cons(
-                                    Object::Char(97, 2),
+                                    Object::make_char(97, 2),
                                     Object::make_cons(
-                                        Object::Char(98, 1),
+                                        Object::make_char(98, 1),
                                         Object::make_cons(
-                                            Object::Char(48, 0),
+                                            Object::make_char(48, 0),
                                             Object::make_cons(
-                                                Object::Char(57, 0),
-                                                Object::make_cons(Object::Char(10, 0), Object::Nil)
+                                                Object::make_char(57, 0),
+                                                Object::make_cons(
+                                                    Object::make_char(10, 0),
+                                                    Object::Nil
+                                                )
                                             )
                                         )
                                     )
