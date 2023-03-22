@@ -1,3 +1,4 @@
+use crate::builtins::BuiltinFunc;
 use crate::error::Errors;
 
 use std::cell::RefCell;
@@ -34,6 +35,7 @@ pub enum Object {
         /* arguments */ Vec<String>,
         /* lambda body */ Rc<RefCell<Object>>,
     ),
+    BuiltinFunc(Box<BuiltinFunc>),
 }
 
 impl Object {

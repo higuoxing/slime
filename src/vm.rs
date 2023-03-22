@@ -115,7 +115,7 @@ fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
-    prelude: HashMap<String, BuiltinFunc>,
+    prelude: HashMap<String, Box<BuiltinFunc>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
@@ -149,10 +149,14 @@ impl Machine {
                 None => continue,
             }
         }
-        return Err(Errors::RuntimeException(format!(
-            "Cannot resolve symbol '{}'",
-            sym
-        )));
+
+        match self.prelude.get(sym) {
+            Some(f) => Ok(Rc::new(RefCell::new(Object::BuiltinFunc(f.clone())))),
+            None => Err(Errors::RuntimeException(format!(
+                "Cannot resolve symbol '{}'",
+                sym
+            ))),
+        }
     }
 
     fn define_symbol(&mut self, sym: &str, val: Rc<RefCell<Object>>) -> Result<(), Errors> {
@@ -387,6 +391,7 @@ impl Machine {
                     )))),
                 ))
             }
+            Object::BuiltinFunc(ref builtin_func) => Ok((builtin_func(cdr.clone())?, None)),
             ref o => Err(Errors::RuntimeException(format!(
                 "Object '{:?}' is not callable",
                 o
@@ -427,6 +432,7 @@ impl Machine {
             | atom @ Object::String(_)
             | atom @ Object::Lambda(_, _)
             | atom @ Object::Real(_)
+            | atom @ Object::BuiltinFunc(_)
             | atom @ Object::Nil => return Ok((atom.clone(), None)),
         }
     }
@@ -614,6 +620,13 @@ mod tests {
         assert_eq!(
             m.eval(parse_program("'a").unwrap()).unwrap(),
             Object::Symbol(String::from("a"))
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((if #f + cons) 3 4)").unwrap())
+                .unwrap(),
+            Object::make_cons(Object::Int(3), Object::Int(4))
         );
         assert_eq!(m.stack.len(), 0);
     }
