@@ -2,6 +2,9 @@ use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
 
+// See https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
+// for syntax and semantics of MIT Scheme.
+
 fn parse_bool<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
     let curr_token = tokens[*token_cursor];
     match curr_token.kind() {
@@ -159,10 +162,7 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
             }
 
             *token_cursor += 1;
-            return Ok(Object::Char {
-                char_code,
-                bucky_bits,
-            });
+            return Ok(Object::make_char(char_code, bucky_bits));
         }
         _ => Err(Errors::UnexpectedToken(
             curr_token.line(),

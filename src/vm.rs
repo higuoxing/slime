@@ -109,6 +109,53 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     })
 }
 
+// Construct the 'let' expression from a expr.
+// FIXME: Better error message.
+fn make_let_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let expr_vec = Object::cons_to_vec(expr)?;
+    if expr_vec.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "Unexpected number of arguments for 'LET'"
+        )));
+    }
+
+    let bindings_expr = Object::cons_to_vec(expr_vec[0].clone())?;
+    let body_expr = expr_vec[1].clone();
+    let mut binding_symbols = vec![];
+
+    for bexpr in bindings_expr.iter() {
+        match *bexpr.borrow() {
+            Object::Cons { ref car, ref cdr } => match &*car.borrow() {
+                Object::Symbol(ref symbol_name) => match &*cdr.borrow() {
+                    Object::Cons { ref car, .. } => {
+                        binding_symbols.push((symbol_name.clone(), car.clone()))
+                    }
+                    _ => {
+                        return Err(Errors::RuntimeException(format!(
+                            "Unexpected number of arguments for 'LET'"
+                        )))
+                    }
+                },
+                _ => {
+                    return Err(Errors::RuntimeException(format!(
+                        "Unexpected number of arguments for 'LET'"
+                    )))
+                }
+            },
+            _ => {
+                return Err(Errors::RuntimeException(format!(
+                    "Unexpected number of arguments for 'LET'"
+                )))
+            }
+        }
+    }
+
+    Ok(Object::Let {
+        bindings: binding_symbols,
+        body: body_expr,
+    })
+}
+
 // Construct the 'quote' expression.
 fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let args = Object::cons_to_vec(expr)?;
@@ -165,18 +212,18 @@ impl Machine {
         }
     }
 
-    fn define_symbol(&mut self, sym: &str, val: Rc<RefCell<Object>>) -> Result<(), Errors> {
-        match self.env.front_mut() {
-            Some(env) => {
-                if let Some(v) = env.get_mut(sym) {
-                    *v = val.clone();
-                } else {
-                    env.insert(sym.to_string(), val.clone());
-                }
-                Ok(())
-            }
-            None => panic!("You should provide an environment first!"),
+    fn define_symbol(
+        &mut self,
+        env: &mut HashMap<String, Rc<RefCell<Object>>>,
+        sym: &str,
+        val: Rc<RefCell<Object>>,
+    ) -> Result<(), Errors> {
+        if let Some(v) = env.get_mut(sym) {
+            *v = val.clone();
+        } else {
+            env.insert(sym.to_string(), val.clone());
         }
+        Ok(())
     }
 
     // Evaluate the condition expression and returns the 'then' clause
@@ -244,7 +291,9 @@ impl Machine {
     > {
         self.stack.push(expr);
         let evaluated = Rc::new(RefCell::new(self.eval_recursive()?));
-        self.define_symbol(symbol_name, evaluated)?;
+        let mut curr_env = self.env.pop_front().unwrap();
+        self.define_symbol(&mut curr_env, symbol_name, evaluated)?;
+        self.env.push_front(curr_env);
 
         Ok((Object::Nil, None))
     }
@@ -277,6 +326,10 @@ impl Machine {
             "LAMBDA" => Ok((
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
+            )),
+            "LET" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_let_expr(expr)?))),
             )),
             "QUOTE" => Ok((
                 Object::Nil,
@@ -326,23 +379,58 @@ impl Machine {
         }
 
         // Push a new env first.
-        self.env.push_front(HashMap::new());
+        let mut new_env = HashMap::new();
 
         // Pass arguments by env.
         for arg_index in 0..lambda_args.len() {
             self.stack.push(passed_args_vec[arg_index].clone());
             let evaluated = self.eval_recursive()?;
+
             self.define_symbol(
+                &mut new_env,
                 lambda_args[arg_index].as_str(),
                 Rc::new(RefCell::new(evaluated)),
             )?;
         }
-
+        self.env.push_front(new_env);
         self.stack.push(lambda_expr.clone());
         let result = self.eval_recursive()?;
 
         // Pop the env since we use it to pass arguments to the lambda expression,
         // and we should clean it up.
+        self.env.pop_front();
+
+        Ok((result, None))
+    }
+
+    fn eval_let_expr(
+        &mut self,
+        bindings: &Vec<(String, Rc<RefCell<Object>>)>,
+        body: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        let mut env = HashMap::new();
+
+        for binding in bindings {
+            self.stack.push(binding.1.clone());
+            let evaluated = self.eval_recursive()?;
+            self.define_symbol(
+                &mut env,
+                binding.0.as_str(),
+                Rc::new(RefCell::new(evaluated)),
+            )?;
+        }
+
+        self.env.push_front(env);
+        self.stack.push(body);
+        let result = self.eval_recursive()?;
+
+        // Pop the current env, since we don't need it again.
         self.env.pop_front();
 
         Ok((result, None))
@@ -447,6 +535,10 @@ impl Machine {
                 Some(self.resolve_symbol(symbol_name.as_str())?),
             )),
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
+            Object::Let {
+                ref bindings,
+                ref body,
+            } => self.eval_let_expr(bindings, body.clone()),
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
@@ -662,6 +754,20 @@ mod tests {
                     Object::make_cons(Object::Int(2), Object::Nil)
                 )
             )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(let ((x 2) (y 3)) (* x y))").unwrap())
+                .unwrap(),
+            Object::Int(6)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(let ((x 2) (y 3)) (let ((x 7) (z (+ x y))) (* z x)))").unwrap())
+                .unwrap(),
+            Object::Int(35)
         );
         assert_eq!(m.stack.len(), 0);
     }

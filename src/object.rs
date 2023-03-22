@@ -38,6 +38,10 @@ pub enum Object {
         lambda_args: Vec<String>,
         lambda_body: Rc<RefCell<Object>>,
     },
+    Let {
+        bindings: Vec<(String, Rc<RefCell<Object>>)>,
+        body: Rc<RefCell<Object>>,
+    },
     BuiltinFunc(/* Function prototype */ Rc<BuiltinFuncSig>),
 }
 
