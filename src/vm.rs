@@ -5,6 +5,103 @@ use std::rc::Rc;
 use crate::error::Errors;
 use crate::object::Object;
 
+// Construct the 'begin' expression from a expr.
+fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    Ok(Object::Begin(expr))
+}
+
+// Construct the 'define' expression from a expr.
+fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    // There're 3 forms of define.
+    // 1) (define <variable> <expression>)
+    // 2) (define (<variable> <formals>) <body>) which is equivalent to
+    //      (define <variable>
+    //        (lambda (<formals>) <body>))
+    // 3) (define (<variable> . <formal>) <body>) which is equivalent to
+    //      (define <variable>
+    //        (lambda <formal> <body>))
+    // See: https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
+    //
+    // We only allows the first 2 forms here.
+    let define_body = Object::cons_to_vec(expr)?;
+    if define_body.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "'DEFINE' should be followed by a symbol and an expression"
+        )));
+    }
+
+    if define_body[0].borrow().is_symbol() {
+        let sym = define_body[0].borrow().symbol_name();
+        Ok(Object::Define(sym, define_body[1].clone()))
+    } else if define_body[0].borrow().is_cons() {
+        // Simple form for defining function.
+        let fun_name_with_args = Object::cons_to_vec(define_body[0].clone())?;
+        let mut args = vec![];
+        // Check function name and arguments.
+        for (sym_index, sym) in fun_name_with_args.iter().enumerate() {
+            if !sym.borrow().is_symbol() {
+                return Err(Errors::RuntimeException(format!(
+                    "'DEFINE' should be followed by a symbol and an expression"
+                )));
+            }
+
+            if sym_index != 0 {
+                args.push(sym.borrow().symbol_name());
+            }
+        }
+        // Construct a lambda expression.
+        let fun_name = fun_name_with_args[0].borrow().symbol_name();
+        let lambda_expr = Object::Lambda(args, define_body[1].clone());
+        Ok(Object::Define(fun_name, Rc::new(RefCell::new(lambda_expr))))
+    } else {
+        Err(Errors::RuntimeException(format!(
+            "'DEFINE' should be followed by a symbol and an expression"
+        )))
+    }
+}
+
+// Construct the 'if' expression from a expr.
+fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let if_body = Object::cons_to_vec(expr.clone())?;
+
+    if if_body.len() != 3 {
+        return Err(Errors::RuntimeException(format!(
+            "'IF' should be followed by a condition clause, a then clause and a else clause"
+        )));
+    }
+
+    Ok(Object::If(
+        if_body[0].clone(),
+        if_body[1].clone(),
+        if_body[2].clone(),
+    ))
+}
+
+// Construct the 'lambda' expression from a expr.
+fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let lambda_body = Object::cons_to_vec(expr.clone())?;
+    if lambda_body.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "'LAMBDA' should be followed by a list of arguments and a function body"
+        )));
+    }
+
+    let lambda_args = Object::cons_to_vec(lambda_body[0].clone())?;
+    let mut args_names = vec![];
+
+    for arg in lambda_args {
+        if !arg.borrow().is_symbol() {
+            return Err(Errors::RuntimeException(format!(
+                "'LAMBDA' should be followed by a list of arguments and a function body"
+            )));
+        }
+
+        args_names.push(arg.borrow().symbol_name());
+    }
+
+    Ok(Object::Lambda(args_names, lambda_body[1].clone()))
+}
+
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
@@ -144,111 +241,20 @@ impl Machine {
             // Build premitives.
             "BEGIN" => Ok((
                 Object::Nil,
-                Some(Rc::new(RefCell::new(Object::Begin(expr)))),
+                Some(Rc::new(RefCell::new(make_begin_expr(expr)?))),
             )),
-            "DEFINE" => {
-                // There're 3 forms of define.
-                // 1) (define <variable> <expression>)
-                // 2) (define (<variable> <formals>) <body>) which is equivalent to
-                //      (define <variable>
-                //        (lambda (<formals>) <body>))
-                // 3) (define (<variable> . <formal>) <body>) which is equivalent to
-                //      (define <variable>
-                //        (lambda <formal> <body>))
-                // See: https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-                //
-                // We only allows the first 2 forms here.
-                let define_body = Object::cons_to_vec(expr)?;
-                if define_body.len() != 2 {
-                    return Err(Errors::RuntimeException(format!(
-                        "'DEFINE' should be followed by a symbol and an expression"
-                    )));
-                }
-
-                if define_body[0].borrow().is_symbol() {
-                    let sym = define_body[0].borrow().symbol_name();
-                    Ok((
-                        Object::Nil,
-                        Some(Rc::new(RefCell::new(Object::Define(
-                            sym,
-                            define_body[1].clone(),
-                        )))),
-                    ))
-                } else if define_body[0].borrow().is_cons() {
-                    // Simple form for defining function.
-                    let fun_name_with_args = Object::cons_to_vec(define_body[0].clone())?;
-                    let mut args = vec![];
-                    // Check function name and arguments.
-                    for (sym_index, sym) in fun_name_with_args.iter().enumerate() {
-                        if !sym.borrow().is_symbol() {
-                            return Err(Errors::RuntimeException(format!(
-                                "'DEFINE' should be followed by a symbol and an expression"
-                            )));
-                        }
-
-                        if sym_index != 0 {
-                            args.push(sym.borrow().symbol_name());
-                        }
-                    }
-                    // Construct a lambda expression.
-                    let fun_name = fun_name_with_args[0].borrow().symbol_name();
-                    let lambda_expr = Object::Lambda(args, define_body[1].clone());
-                    Ok((
-                        Object::Nil,
-                        Some(Rc::new(RefCell::new(Object::Define(
-                            fun_name,
-                            Rc::new(RefCell::new(lambda_expr)),
-                        )))),
-                    ))
-                } else {
-                    Err(Errors::RuntimeException(format!(
-                        "'DEFINE' should be followed by a symbol and an expression"
-                    )))
-                }
-            }
-            "IF" => {
-                let if_body = Object::cons_to_vec(expr.clone())?;
-
-                if if_body.len() != 3 {
-                    return Err(Errors::RuntimeException(format!("'IF' should be followed by a condition clause, a then clause and a else clause")));
-                }
-
-                Ok((
-                    Object::Nil,
-                    Some(Rc::new(RefCell::new(Object::If(
-                        if_body[0].clone(),
-                        if_body[1].clone(),
-                        if_body[2].clone(),
-                    )))),
-                ))
-            }
-            "LAMBDA" => {
-                let lambda_body = Object::cons_to_vec(expr.clone())?;
-                if lambda_body.len() != 2 {
-                    return Err(Errors::RuntimeException(format!(
-                        "'LAMBDA' should be followed by a list of arguments and a function body"
-                    )));
-                }
-
-                let lambda_args = Object::cons_to_vec(lambda_body[0].clone())?;
-                let mut args_names = vec![];
-
-                for arg in lambda_args {
-                    if !arg.borrow().is_symbol() {
-                        return Err(Errors::RuntimeException(format!("'LAMBDA' should be followed by a list of arguments and a function body")));
-                    }
-
-                    args_names.push(arg.borrow().symbol_name());
-                }
-
-                Ok((
-                    Object::Nil,
-                    Some(Rc::new(RefCell::new(Object::Lambda(
-                        args_names,
-                        lambda_body[1].clone(),
-                    )))),
-                ))
-            }
+            "DEFINE" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
+            )),
+            "IF" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_if_expr(expr)?))),
+            )),
+            "LAMBDA" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
+            )),
             _ => {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
