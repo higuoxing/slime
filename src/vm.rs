@@ -13,8 +13,12 @@ pub struct Machine {
 
 impl Machine {
     pub fn new() -> Self {
+        // Prepare a new environment.
+        let mut env_list = LinkedList::new();
+        env_list.push_front(HashMap::new());
+
         Self {
-            env: LinkedList::new(),
+            env: env_list,
             stack: vec![],
         }
     }
@@ -51,7 +55,7 @@ impl Machine {
                 }
                 Ok(())
             }
-            None => panic!("You should provide an enviroment first!"),
+            None => panic!("You should provide an environment first!"),
         }
     }
 
@@ -401,24 +405,10 @@ impl Machine {
     fn eval(&mut self, expr: Object) -> Result<Object, Errors> {
         let expanded_expr = self.expand_macros(expr)?;
 
-        // Set up a new env.
-        self.env.push_front(HashMap::new());
         self.stack
             .push(Rc::new(RefCell::new(/* expr */ expanded_expr)));
 
-        let result = self.eval_recursive()?;
-
-        // FIXME: If there's no environment updates, we just drop the
-        // current environment, to save some space.
-        while self.env.front().is_some() {
-            if self.env.front().unwrap().is_empty() {
-                self.env.pop_front();
-                continue;
-            }
-            break;
-        }
-
-        Ok(result)
+        Ok(self.eval_recursive()?)
     }
 }
 
@@ -545,7 +535,7 @@ mod tests {
             Object::Bool(false)
         );
         assert_eq!(m.stack.len(), 0);
-        assert_eq!(m.env.len(), 2);
+        assert_eq!(m.env.len(), 1);
 
         assert_eq!(
             m.eval(parse_program("(define foo #f) foo").unwrap())
@@ -553,7 +543,7 @@ mod tests {
             Object::Bool(false)
         );
         assert_eq!(m.stack.len(), 0);
-        assert_eq!(m.env.len(), 3);
+        assert_eq!(m.env.len(), 1);
 
         assert_eq!(
             m.eval(parse_program("(define (foo) #f) (foo)").unwrap())
