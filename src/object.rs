@@ -1,7 +1,6 @@
 use crate::error::Errors;
 
 use std::cell::RefCell;
-use std::collections::LinkedList;
 use std::default::Default;
 use std::rc::Rc;
 
@@ -44,18 +43,6 @@ impl Object {
         Object::Begin(Rc::new(RefCell::new(object)))
     }
 
-    pub fn make_if(cond: Object, then: Object, otherwise: Object) -> Object {
-        Object::If(
-            Rc::new(RefCell::new(cond)),
-            Rc::new(RefCell::new(then)),
-            Rc::new(RefCell::new(otherwise)),
-        )
-    }
-
-    pub fn make_define(symbol_name: String, val: Object) -> Object {
-        Object::Define(symbol_name, Rc::new(RefCell::new(val)))
-    }
-
     pub fn is_cons(&self) -> bool {
         match self {
             Object::Cons(_, _) => true,
@@ -73,13 +60,6 @@ impl Object {
     pub fn is_symbol(&self) -> bool {
         match self {
             Object::Symbol(_) => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_numeric(&self) -> bool {
-        match self {
-            Object::Int(_) | Object::Real(_) => true,
             _ => false,
         }
     }
@@ -116,7 +96,7 @@ impl Object {
         tail
     }
 
-    pub fn reverse_list(mut list: Object) -> Object {
+    pub fn reverse_list(list: Object) -> Object {
         Self::reverse_list_with_tail(list, Object::Nil)
     }
 }

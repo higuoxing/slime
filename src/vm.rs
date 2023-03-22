@@ -123,6 +123,7 @@ impl Machine {
         }
     }
 
+    #[allow(unused)]
     pub fn reset(&mut self) {
         self.env = LinkedList::new();
         self.stack = vec![];
@@ -433,7 +434,7 @@ impl Machine {
         }
     }
 
-    fn eval(&mut self, expr: Object) -> Result<Object, Errors> {
+    pub fn eval(&mut self, expr: Object) -> Result<Object, Errors> {
         let expanded_expr = self.expand_macros(expr)?;
 
         self.stack
