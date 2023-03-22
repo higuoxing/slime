@@ -10,9 +10,20 @@ pub type BuiltinFunc = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 pub fn make_prelude_env() -> HashMap<String, BuiltinFunc> {
     let mut builtins = HashMap::new();
 
+    builtins.insert(String::from("cons"), builtin_cons as BuiltinFunc);
     builtins.insert(String::from("+"), builtin_plus as BuiltinFunc);
 
     builtins
+}
+
+fn builtin_cons(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(expr)?;
+    if args.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "CONS expects 2 arguments"
+        )));
+    }
+    Ok(Object::Cons(args[0].clone(), args[1].clone()))
 }
 
 fn builtin_plus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {

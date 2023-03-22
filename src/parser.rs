@@ -168,6 +168,23 @@ fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
     }
 }
 
+fn parse_string<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
+    let curr_token = tokens[*token_cursor];
+    match curr_token.kind() {
+        TokenKind::String => {
+            *token_cursor += 1;
+            let strlen = curr_token.literal().len();
+            return Ok(Object::String(
+                curr_token.literal()[1..strlen - 1].to_string(),
+            ));
+        }
+        _ => Err(Errors::UnexpectedToken(
+            curr_token.line(),
+            curr_token.column(),
+        )),
+    }
+}
+
 fn parse_object_recursive<'a>(
     tokens: &Vec<Token<'a>>,
     token_cursor: &mut usize,
@@ -258,6 +275,7 @@ fn parse_object_recursive<'a>(
         TokenKind::Bool => Ok(parse_bool(tokens, token_cursor)?),
         TokenKind::Symbol => Ok(parse_symbol(tokens, token_cursor)?),
         TokenKind::Char => Ok(parse_char(tokens, token_cursor)?),
+        TokenKind::String => Ok(parse_string(tokens, token_cursor)?),
         _ => {
             panic!("Not implemented!");
         }

@@ -410,6 +410,7 @@ impl Machine {
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
             | atom @ Object::Char(_, _)
+            | atom @ Object::String(_)
             | atom @ Object::Lambda(_, _)
             | atom @ Object::Real(_)
             | atom @ Object::Nil => return Ok((atom.clone(), None)),

@@ -15,6 +15,7 @@ pub enum Object {
     // An MIT Scheme character consists of a code part and a bucky bits part.
     // See: https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
     Char(/* code part */ u32, /* bucky bits part */ u32),
+    String(String),
     Symbol(String),
     Cons(
         /* car */ Rc<RefCell<Object>>,
