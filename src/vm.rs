@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::builtins::{make_prelude_env, BuiltinFuncSig};
 use crate::error::Errors;
-use crate::object::Object;
+use crate::object::{LambdaFormal, Object};
 
 // Construct the 'begin' expression from a expr.
 fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
@@ -53,8 +53,8 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         // Construct a lambda expression.
         let fun_name = fun_name_with_args[0].borrow().symbol_name();
         let lambda_expr = Object::Lambda {
-            lambda_args: args,
-            lambda_body: define_body[1].clone(),
+            formals: Rc::new(RefCell::new(LambdaFormal::Fixed(args))),
+            body: define_body[1].clone(),
         };
         Ok(Object::Define(fun_name, Rc::new(RefCell::new(lambda_expr))))
     } else {
@@ -68,20 +68,32 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let if_body = Object::cons_to_vec(expr.clone())?;
 
-    if if_body.len() != 3 {
+    if if_body.len() < 2 {
         return Err(Errors::RuntimeException(format!(
-            "'IF' should be followed by a condition clause, a then clause and a else clause"
+            "'IF' should be followed by a condition clause, a then clause and an optional else clause"
         )));
     }
 
     Ok(Object::If {
         condition: if_body[0].clone(),
         then: if_body[1].clone(),
-        otherwise: if_body[2].clone(),
+        otherwise: if if_body.len() == 3 {
+            if_body[2].clone()
+        } else {
+            Rc::new(RefCell::new(Object::Unspecified))
+        },
     })
 }
 
-// Construct the 'lambda' expression from a expr.
+// https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_6.html
+// Syntax: lambda <formals> <body>
+// <formals> should have one of the following forms.
+// 1) <variable>:
+//      The procedure takes any number of arguments.
+// 2) (<variable1> <variable2> ... <variable<N>>):
+//      The procedure takes exactly the N number of arguments.
+// 3) (<variable1> <variable2> ... <variable<N-1>> . <variable<N>>)
+//      The procedure takes N or more arguments.
 fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let lambda_body = Object::cons_to_vec(expr.clone())?;
     if lambda_body.len() != 2 {
@@ -90,27 +102,53 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         )));
     }
 
-    let lambda_args = Object::cons_to_vec(lambda_body[0].clone())?;
-    let mut args_names = vec![];
+    match &*lambda_body[0].clone().borrow() {
+        // Any.
+        Object::Symbol(ref formal) => Ok(Object::Lambda {
+            formals: Rc::new(RefCell::new(LambdaFormal::Any(formal.clone()))),
+            body: lambda_body[1].clone(),
+        }),
+        Object::Cons { .. } => {
+            let mut curr_cell = lambda_body[0].clone();
+            let mut formals = vec![];
+            let mut last_symbol = None;
 
-    for arg in lambda_args {
-        if !arg.borrow().is_symbol() {
-            return Err(Errors::RuntimeException(format!(
-                "'LAMBDA' should be followed by a list of arguments and a function body"
-            )));
+            while let Object::Cons { ref car, ref cdr } = &*curr_cell.clone().borrow() {
+                if let Object::Symbol(ref symbol_name) = &*car.clone().borrow() {
+                    formals.push(symbol_name.clone());
+                } else {
+                    return Err(Errors::RuntimeException(format!(
+                        "'LAMBDA' should be followed by a list of arguments and a function body"
+                    )));
+                }
+
+                if let Object::Symbol(ref symbol_name) = &*cdr.clone().borrow() {
+                    last_symbol = Some(symbol_name.clone());
+                }
+
+                curr_cell = cdr.clone();
+            }
+
+            match last_symbol {
+                Some(last_sym) => Ok(Object::Lambda {
+                    formals: Rc::new(RefCell::new(LambdaFormal::AtLeastN(formals, last_sym))),
+                    body: lambda_body[1].clone(),
+                }),
+                None => Ok(Object::Lambda {
+                    formals: Rc::new(RefCell::new(LambdaFormal::Fixed(formals))),
+                    body: lambda_body[1].clone(),
+                }),
+            }
         }
 
-        args_names.push(arg.borrow().symbol_name());
+        _ => Err(Errors::RuntimeException(format!(
+            "'LAMBDA' should be followed by a list of arguments and a function body"
+        ))),
     }
-
-    Ok(Object::Lambda {
-        lambda_args: args_names,
-        lambda_body: lambda_body[1].clone(),
-    })
 }
 
 // Construct the 'let' expression from a expr.
-// FIXME: Better error message.
+// FIXME: 'let' should be implemented by macro???
 fn make_let_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let expr_vec = Object::cons_to_vec(expr)?;
     if expr_vec.len() != 2 {
@@ -319,6 +357,7 @@ impl Machine {
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
             )),
+            "DEFINE-MACRO" => todo!(),
             "IF" => Ok((
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_if_expr(expr)?))),
@@ -361,9 +400,9 @@ impl Machine {
 
     fn eval_lambda_expr(
         &mut self,
-        lambda_args: &Vec<String>,
-        lambda_expr: Rc<RefCell<Object>>,
-        passed_args: Rc<RefCell<Object>>,
+        formals: Rc<RefCell<LambdaFormal>>,
+        body: Rc<RefCell<Object>>,
+        args: Rc<RefCell<Object>>,
     ) -> Result<
         (
             /* curr_result */ Object,
@@ -371,36 +410,110 @@ impl Machine {
         ),
         Errors,
     > {
-        let passed_args_vec = Object::cons_to_vec(passed_args.clone())?;
-        if lambda_args.len() != passed_args_vec.len() {
-            return Err(Errors::RuntimeException(format!(
-                "Incorrect number of arguments supplied to lambda expression, expected: {}, provided: {}"
-            , lambda_args.len(), passed_args_vec.len())));
+        match &*formals.clone().borrow() {
+            LambdaFormal::Any(ref symbol_name) => {
+                let passed_args = Object::cons_to_vec(args.clone())?;
+                let mut tail = Object::Nil;
+
+                for arg in passed_args {
+                    self.stack.push(arg);
+                    let evaluated = self.eval_recursive()?;
+
+                    tail = Object::make_cons(evaluated, tail);
+                }
+
+                tail = Object::reverse_list(tail);
+
+                // Prepare a new env.
+                let mut new_env = HashMap::new();
+                self.define_symbol(
+                    &mut new_env,
+                    symbol_name.as_str(),
+                    Rc::new(RefCell::new(tail)),
+                )?;
+                self.env.push_front(new_env);
+
+                // Evaluate the lambda expr.
+                self.stack.push(body.clone());
+                let result = self.eval_recursive()?;
+                self.env.pop_front();
+
+                Ok((result, None))
+            }
+            LambdaFormal::Fixed(ref symbols) => {
+                let passed_args_vec = Object::cons_to_vec(args.clone())?;
+                if passed_args_vec.len() != symbols.len() {
+                    return Err(Errors::RuntimeException(format!("Incorrect number of arguments supplied to lambda expression, expected: {}, provided: {}", symbols.len(), passed_args_vec.len())));
+                }
+
+                // Prepare a new env.
+                let mut new_env = HashMap::new();
+
+                for arg_index in 0..symbols.len() {
+                    self.stack.push(passed_args_vec[arg_index].clone());
+                    let evaluated = self.eval_recursive()?;
+
+                    self.define_symbol(
+                        &mut new_env,
+                        symbols[arg_index].as_str(),
+                        Rc::new(RefCell::new(evaluated)),
+                    )?;
+                }
+
+                self.env.push_front(new_env);
+                self.stack.push(body.clone());
+                let result = self.eval_recursive()?;
+
+                // Pop the env since we use it to pass arguments to the lambda expression,
+                // and we should clean it up.
+                self.env.pop_front();
+
+                Ok((result, None))
+            }
+            LambdaFormal::AtLeastN(ref symbols, ref last_symbol) => {
+                let passed_args_vec = Object::cons_to_vec(args.clone())?;
+                if passed_args_vec.len() < symbols.len() {
+                    return Err(
+			Errors::RuntimeException(
+			    format!("Incorrect number of arguments supplied to lambda expression, expected at least {}, provided: {}",
+				    symbols.len(), passed_args_vec.len())));
+                }
+
+                // Prepare a new env.
+                let mut new_env = HashMap::new();
+
+                let mut tail = Object::Nil;
+
+                for (arg_index, arg) in passed_args_vec.iter().enumerate() {
+                    self.stack.push(arg.clone());
+                    let evaluated = self.eval_recursive()?;
+
+                    if arg_index < symbols.len() {
+                        self.define_symbol(
+                            &mut new_env,
+                            symbols[arg_index].as_str(),
+                            Rc::new(RefCell::new(evaluated)),
+                        )?;
+                    } else {
+                        tail = Object::make_cons(evaluated, tail);
+                    }
+                }
+
+                // The last argument.
+                self.define_symbol(
+                    &mut new_env,
+                    last_symbol.as_str(),
+                    Rc::new(RefCell::new(Object::reverse_list(tail))),
+                )?;
+
+                self.env.push_front(new_env);
+                self.stack.push(body.clone());
+                let result = self.eval_recursive()?;
+                self.env.pop_front();
+
+                Ok((result, None))
+            }
         }
-
-        // Push a new env first.
-        let mut new_env = HashMap::new();
-
-        // Pass arguments by env.
-        for arg_index in 0..lambda_args.len() {
-            self.stack.push(passed_args_vec[arg_index].clone());
-            let evaluated = self.eval_recursive()?;
-
-            self.define_symbol(
-                &mut new_env,
-                lambda_args[arg_index].as_str(),
-                Rc::new(RefCell::new(evaluated)),
-            )?;
-        }
-        self.env.push_front(new_env);
-        self.stack.push(lambda_expr.clone());
-        let result = self.eval_recursive()?;
-
-        // Pop the env since we use it to pass arguments to the lambda expression,
-        // and we should clean it up.
-        self.env.pop_front();
-
-        Ok((result, None))
     }
 
     fn eval_let_expr(
@@ -478,11 +591,11 @@ impl Machine {
                 self.eval_callable_symbol(symbol_name.as_str(), cdr)
             }
             Object::Lambda {
-                ref lambda_args,
-                ref lambda_body,
+                ref formals,
+                ref body,
             } => {
                 // Apply lambda expression against 'cdr'.
-                self.eval_lambda_expr(lambda_args, lambda_body.clone(), cdr.clone())
+                self.eval_lambda_expr(formals.clone(), body.clone(), cdr.clone())
             }
             Object::Cons { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
@@ -530,10 +643,10 @@ impl Machine {
                 ref then,
                 ref otherwise,
             } => self.eval_if_expr(condition.clone(), then.clone(), otherwise.clone()),
-            Object::Symbol(ref symbol_name) => Ok((
-                Object::Nil,
-                Some(self.resolve_symbol(symbol_name.as_str())?),
-            )),
+            Object::Symbol(ref symbol_name) => {
+                let resolved_sym = self.resolve_symbol(symbol_name.as_str())?.borrow().clone();
+                Ok((resolved_sym, None))
+            }
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
             Object::Let {
                 ref bindings,
@@ -547,7 +660,8 @@ impl Machine {
             | atom @ Object::Lambda { .. }
             | atom @ Object::Real(_)
             | atom @ Object::BuiltinFunc(_)
-            | atom @ Object::Nil => return Ok((atom.clone(), None)),
+            | atom @ Object::Nil
+            | atom @ Object::Unspecified => return Ok((atom.clone(), None)),
         }
     }
 
@@ -768,6 +882,43 @@ mod tests {
             m.eval(parse_program("(let ((x 2) (y 3)) (let ((x 7) (z (+ x y))) (* z x)))").unwrap())
                 .unwrap(),
             Object::Int(35)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((lambda x x) 1 2 3)").unwrap())
+                .unwrap(),
+            Object::make_cons(
+                Object::Int(1),
+                Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
+            )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((lambda (a . b) a) 1 2 3)").unwrap())
+                .unwrap(),
+            Object::Int(1)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((lambda (a . b) b) 1 2 3)").unwrap())
+                .unwrap(),
+            Object::make_cons(
+                Object::Int(2),
+                Object::make_cons(Object::Int(3), Object::Nil)
+            )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((lambda (a . b) b) 1)").unwrap())
+                .unwrap(),
+            Object::Nil,
         );
         assert_eq!(m.stack.len(), 0);
     }

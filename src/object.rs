@@ -5,10 +5,21 @@ use std::cell::RefCell;
 use std::default::Default;
 use std::rc::Rc;
 
+#[derive(Debug, PartialEq)]
+pub enum LambdaFormal {
+    // Any number of arguments.
+    Any(String),
+    // Fix number of arguments.
+    Fixed(Vec<String>),
+    // At least N arguments.
+    AtLeastN(Vec<String>, /* The last symbol */ String),
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Object {
     // Default is needed for taking ownership.
     #[default]
+    Unspecified,
     Nil,
     Real(f64),
     Int(i64),
@@ -35,8 +46,8 @@ pub enum Object {
     },
     Define(String, Rc<RefCell<Object>>),
     Lambda {
-        lambda_args: Vec<String>,
-        lambda_body: Rc<RefCell<Object>>,
+        formals: Rc<RefCell<LambdaFormal>>,
+        body: Rc<RefCell<Object>>,
     },
     Let {
         bindings: Vec<(String, Rc<RefCell<Object>>)>,
@@ -104,7 +115,7 @@ impl Object {
         } else {
             let mut result = vec![];
 
-            while let Object::Cons { ref car, ref cdr } = *cons.clone().borrow() {
+            while let Object::Cons { ref car, ref cdr } = &*cons.clone().borrow() {
                 result.push(car.clone());
                 cons = cdr.clone();
             }
