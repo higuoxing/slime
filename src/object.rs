@@ -3,6 +3,7 @@ use crate::error::Errors;
 
 use std::cell::RefCell;
 use std::default::Default;
+use std::fmt;
 use std::rc::Rc;
 
 #[derive(Debug, PartialEq)]
@@ -53,7 +54,10 @@ pub enum Object {
         bindings: Vec<(String, Rc<RefCell<Object>>)>,
         body: Rc<RefCell<Object>>,
     },
-    BuiltinFunc(/* Function prototype */ Rc<BuiltinFuncSig>),
+    BuiltinFunc(
+        /* Function prototype */ Rc<BuiltinFuncSig>,
+        /* Index */ usize,
+    ),
 }
 
 impl Object {
@@ -134,6 +138,93 @@ impl Object {
 
     pub fn reverse_list(list: Object) -> Object {
         Self::reverse_list_with_tail(list, Object::Nil)
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            Object::Bool(b) => {
+                if *b {
+                    String::from("#t")
+                } else {
+                    String::from("#f")
+                }
+            }
+            Object::BuiltinFunc(_, index) => {
+                format!("#[builtin-procedure #{}]", index)
+            }
+            Object::Char {
+                char_code,
+                bucky_bits,
+            } => {
+                format!("#\\{}-{}", char_code, bucky_bits)
+            }
+            Object::Cons { car, cdr } => {
+                let mut result_str = String::from("(");
+                let mut tail = Rc::new(RefCell::new(Object::Cons {
+                    car: car.clone(),
+                    cdr: cdr.clone(),
+                }));
+
+                while let Object::Cons { ref car, ref cdr } = &*tail.clone().borrow() {
+                    result_str += car.borrow().to_string().as_str();
+
+                    match &*cdr.clone().borrow() {
+                        Object::Cons { .. } => result_str += " ",
+                        o => {
+                            if !o.is_nil() {
+                                result_str += format!(" . {}", o.to_string()).as_str();
+                            }
+                        }
+                    }
+
+                    tail = cdr.clone();
+                }
+
+                result_str += ")";
+                result_str
+            }
+            Object::Lambda { formals, .. } => match &*formals.clone().borrow() {
+                LambdaFormal::Any(ref sym) => format!("lambda ({}..)", sym.as_str()),
+                LambdaFormal::Fixed(ref symbols) => {
+                    let mut result_str = String::from("lambda (");
+
+                    for (sym_index, sym) in symbols.iter().enumerate() {
+                        result_str += sym.to_string().as_str();
+                        if sym_index != symbols.len() - 1 {
+                            result_str += " ";
+                        }
+                    }
+
+                    result_str += ")";
+                    result_str
+                }
+                LambdaFormal::AtLeastN(ref symbols, ref last_sym) => {
+                    let mut result_str = String::from("lambda (");
+
+                    for (sym_index, sym) in symbols.iter().enumerate() {
+                        result_str += sym.to_string().as_str();
+                        if sym_index != symbols.len() - 1 {
+                            result_str += " ";
+                        }
+                    }
+
+                    result_str += format!(" {}..)", last_sym).as_str();
+                    result_str
+                }
+            },
+            Object::Nil => String::from("()"),
+            Object::Int(n) => format!("{}", n),
+            Object::Real(n) => format!("{}", n),
+            Object::String(s) => format!("\"{}\"", s),
+            Object::Symbol(_) => self.symbol_name(),
+            _ => todo!(),
+        }
+    }
+}
+
+impl fmt::Display for Object {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
 

@@ -206,7 +206,7 @@ fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
-    prelude: HashMap<String, Rc<BuiltinFuncSig>>,
+    prelude: HashMap<String, (Rc<BuiltinFuncSig>, usize)>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
@@ -242,7 +242,10 @@ impl Machine {
         }
 
         match self.prelude.get(sym) {
-            Some(f) => Ok(Rc::new(RefCell::new(Object::BuiltinFunc(f.clone())))),
+            Some((f, index)) => Ok(Rc::new(RefCell::new(Object::BuiltinFunc(
+                f.clone(),
+                *index,
+            )))),
             None => Err(Errors::RuntimeException(format!(
                 "Cannot resolve symbol '{}'",
                 sym
@@ -610,7 +613,7 @@ impl Machine {
                     }))),
                 ))
             }
-            Object::BuiltinFunc(ref builtin_func) => {
+            Object::BuiltinFunc(ref builtin_func, _) => {
                 self.eval_builtin_func(builtin_func.clone(), cdr.clone())
             }
             ref o => Err(Errors::RuntimeException(format!(
@@ -659,7 +662,7 @@ impl Machine {
             | atom @ Object::String(_)
             | atom @ Object::Lambda { .. }
             | atom @ Object::Real(_)
-            | atom @ Object::BuiltinFunc(_)
+            | atom @ Object::BuiltinFunc(_, _)
             | atom @ Object::Nil
             | atom @ Object::Unspecified => return Ok((atom.clone(), None)),
         }

@@ -19,7 +19,12 @@ fn main() -> Result<()> {
                 let _ = rl.add_history_entry(line.as_str())?;
                 match parser::parse_program(line.as_str()) {
                     Ok(parsed_ast) => match lisp_machine.eval(parsed_ast) {
-                        Ok(result) => println!("{:?}", result),
+                        Ok(result) => match result {
+                            object::Object::Unspecified => {
+                                println!("\n; Unspecified return value\n")
+                            }
+                            _ => println!("\n; Value: {}\n", result),
+                        },
                         Err(e) => println!("{:?}", e),
                     },
                     Err(e) => println!("{:?}", e),

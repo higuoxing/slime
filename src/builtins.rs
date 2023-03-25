@@ -13,12 +13,12 @@ const BUILTIN_FUNCTIONS: &[(&str, BuiltinFuncSig)] = &[
     ("*", builtin_times as BuiltinFuncSig),
 ];
 
-pub fn make_prelude_env() -> HashMap<String, Rc<BuiltinFuncSig>> {
-    let mut builtins: HashMap<String, Rc<BuiltinFuncSig>> = HashMap::new();
+pub fn make_prelude_env() -> HashMap<String, (Rc<BuiltinFuncSig>, usize)> {
+    let mut builtins: HashMap<String, (Rc<BuiltinFuncSig>, usize)> = HashMap::new();
 
     // Initialize the builtin function table.
-    for (fun_name, fun_impl) in BUILTIN_FUNCTIONS {
-        builtins.insert(fun_name.to_string(), Rc::new(*fun_impl));
+    for (fun_index, (fun_name, fun_impl)) in BUILTIN_FUNCTIONS.iter().enumerate() {
+        builtins.insert(fun_name.to_string(), (Rc::new(*fun_impl), fun_index));
     }
 
     builtins
