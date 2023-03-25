@@ -7,12 +7,12 @@ use crate::error::Errors;
 use crate::object::{LambdaFormal, Object};
 
 // Construct the 'begin' expression from a expr.
-fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
-    Ok(Object::Begin(expr))
+fn make_begin_expr(expr: Object) -> Result<Object, Errors> {
+    Ok(Object::Begin(Rc::new(RefCell::new(expr))))
 }
 
 // Construct the 'define' expression from a expr.
-fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+fn make_define_expr(expr: Object) -> Result<Object, Errors> {
     // There're 3 forms of define.
     // 1) (define <variable> <expression>)
     // 2) (define (<variable> <formals>) <body>) which is equivalent to
@@ -24,7 +24,7 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     // See: https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
     //
     // We only allows the first 2 forms here.
-    let define_body = Object::cons_to_vec(expr)?;
+    let define_body = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
     if define_body.len() != 2 {
         return Err(Errors::RuntimeException(format!(
             "'DEFINE' should be followed by a symbol and an expression"
@@ -65,8 +65,8 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 }
 
 // Construct the 'if' expression from a expr.
-fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
-    let if_body = Object::cons_to_vec(expr.clone())?;
+fn make_if_expr(expr: Object) -> Result<Object, Errors> {
+    let if_body = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
 
     if if_body.len() < 2 {
         return Err(Errors::RuntimeException(format!(
@@ -94,8 +94,8 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 //      The procedure takes exactly the N number of arguments.
 // 3) (<variable1> <variable2> ... <variable<N-1>> . <variable<N>>)
 //      The procedure takes N or more arguments.
-fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
-    let lambda_body = Object::cons_to_vec(expr.clone())?;
+fn make_lambda_expr(expr: Object) -> Result<Object, Errors> {
+    let lambda_body = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
     if lambda_body.len() != 2 {
         return Err(Errors::RuntimeException(format!(
             "'LAMBDA' should be followed by a list of arguments and a function body"
@@ -149,8 +149,8 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 
 // Construct the 'let' expression from a expr.
 // FIXME: 'let' should be implemented by macro???
-fn make_let_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
-    let expr_vec = Object::cons_to_vec(expr)?;
+fn make_let_expr(expr: Object) -> Result<Object, Errors> {
+    let expr_vec = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
     if expr_vec.len() != 2 {
         return Err(Errors::RuntimeException(format!(
             "Unexpected number of arguments for 'LET'"
@@ -195,12 +195,30 @@ fn make_let_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 }
 
 // Construct the 'quote' expression.
-fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
-    let args = Object::cons_to_vec(expr)?;
+fn make_quote_expr(expr: Object) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
     if args.len() != 1 {
         return Err(Errors::RuntimeException(format!("Ill-formed syntax")));
     }
     Ok(Object::Quote(args[0].clone()))
+}
+
+// Construct the 'quasi-quote' expression.
+fn make_quasiquote_expr(expr: Object) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
+    if args.len() != 1 {
+        return Err(Errors::RuntimeException(format!("Ill-formed syntax")));
+    }
+    Ok(Object::QuasiQuote(args[0].clone()))
+}
+
+// Construct the 'unquote' expression.
+fn make_unquote_expr(expr: Object) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(Rc::new(RefCell::new(expr)))?;
+    if args.len() != 1 {
+        return Err(Errors::RuntimeException(format!("Ill-formed syntax")));
+    }
+    Ok(Object::UnQuote(args[0].clone()))
 }
 
 pub struct Machine {
@@ -227,10 +245,6 @@ impl Machine {
     pub fn reset(&mut self) {
         self.env = LinkedList::new();
         self.stack = vec![];
-    }
-
-    fn expand_macros(&mut self, expr: Object) -> Result<Object, Errors> {
-        Ok(expr)
     }
 
     fn resolve_symbol(&self, sym: &str) -> Result<Rc<RefCell<Object>>, Errors> {
@@ -350,33 +364,7 @@ impl Machine {
         ),
         Errors,
     > {
-        match symbol_name.to_uppercase().as_str() {
-            // Build premitives.
-            "BEGIN" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_begin_expr(expr)?))),
-            )),
-            "DEFINE" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
-            )),
-            "DEFINE-MACRO" => todo!(),
-            "IF" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_if_expr(expr)?))),
-            )),
-            "LAMBDA" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
-            )),
-            "LET" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_let_expr(expr)?))),
-            )),
-            "QUOTE" => Ok((
-                Object::Nil,
-                Some(Rc::new(RefCell::new(make_quote_expr(expr)?))),
-            )),
+        match symbol_name.to_lowercase().as_str() {
             _ => {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
@@ -600,7 +588,10 @@ impl Machine {
                 // Apply lambda expression against 'cdr'.
                 self.eval_lambda_expr(formals.clone(), body.clone(), cdr.clone())
             }
-            Object::Cons { .. } => {
+            Object::BuiltinFunc(ref builtin_func, _) => {
+                self.eval_builtin_func(builtin_func.clone(), cdr.clone())
+            }
+            Object::Cons { .. } | Object::If { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
                 // it against 'cdr'.
                 self.stack.push(car.clone());
@@ -613,12 +604,9 @@ impl Machine {
                     }))),
                 ))
             }
-            Object::BuiltinFunc(ref builtin_func, _) => {
-                self.eval_builtin_func(builtin_func.clone(), cdr.clone())
-            }
             ref o => Err(Errors::RuntimeException(format!(
-                "Object '{:?}' is not callable",
-                o
+                "Object '{}' is not callable",
+                o.to_string()
             ))),
         }
     }
@@ -651,10 +639,16 @@ impl Machine {
                 Ok((resolved_sym, None))
             }
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
+            Object::QuasiQuote(ref quasiquoted_expr) => {
+                Ok((quasiquoted_expr.borrow().clone(), None))
+            }
             Object::Let {
                 ref bindings,
                 ref body,
             } => self.eval_let_expr(bindings, body.clone()),
+            Object::UnQuote(ref _unquoted_expr) => {
+                todo!();
+            }
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
@@ -686,12 +680,89 @@ impl Machine {
         }
     }
 
+    fn expand_expr_recursive(expr: Object, quasi_dep: i64) -> Result<Object, Errors> {
+        match expr {
+            Object::Begin(seq) => {
+                return Ok(Object::make_begin(Self::expand_expr_recursive(
+                    seq.take(),
+                    quasi_dep,
+                )?));
+            }
+            Object::Cons { car, cdr } => match car.take() {
+                Object::Symbol(symbol_name) => match symbol_name.to_lowercase().as_ref() {
+                    "begin" => {
+                        return make_begin_expr(Self::expand_expr_recursive(
+                            cdr.take(),
+                            quasi_dep,
+                        )?);
+                    }
+                    "define" => {
+                        let def =
+                            make_define_expr(Self::expand_expr_recursive(cdr.take(), quasi_dep)?);
+                        return def;
+                    }
+                    "if" => {
+                        return make_if_expr(Self::expand_expr_recursive(cdr.take(), quasi_dep)?);
+                    }
+                    "lambda" => {
+                        return make_lambda_expr(Self::expand_expr_recursive(
+                            cdr.take(),
+                            quasi_dep,
+                        )?);
+                    }
+                    "let" => {
+                        return make_let_expr(Self::expand_expr_recursive(cdr.take(), quasi_dep)?);
+                    }
+                    "quote" => {
+                        return make_quote_expr(Self::expand_expr_recursive(
+                            cdr.take(),
+                            quasi_dep,
+                        )?);
+                    }
+                    "quasiquote" => {
+                        return make_quasiquote_expr(Self::expand_expr_recursive(
+                            cdr.take(),
+                            quasi_dep + 1,
+                        )?);
+                    }
+                    "unquote" => {
+                        if quasi_dep > 0 {
+                            return make_unquote_expr(Self::expand_expr_recursive(
+                                cdr.take(),
+                                quasi_dep - 1,
+                            )?);
+                        } else {
+                            return Err(Errors::RuntimeException(String::from(
+                                "unquote should be used in (quasiquote ..)",
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Ok(Object::make_cons(
+                            Object::Symbol(symbol_name),
+                            Self::expand_expr_recursive(cdr.take(), quasi_dep)?,
+                        ));
+                    }
+                },
+                car => {
+                    return Ok(Object::make_cons(
+                        Self::expand_expr_recursive(car, quasi_dep)?,
+                        Self::expand_expr_recursive(cdr.take(), quasi_dep)?,
+                    ))
+                }
+            },
+            atom @ _ => return Ok(atom),
+        }
+    }
+
+    fn expand_expr(expr: Object) -> Result<Object, Errors> {
+        let expanded = Self::expand_expr_recursive(expr, 0)?;
+        return Ok(expanded);
+    }
+
     pub fn eval(&mut self, expr: Object) -> Result<Object, Errors> {
-        let expanded_expr = self.expand_macros(expr)?;
-
         self.stack
-            .push(Rc::new(RefCell::new(/* expr */ expanded_expr)));
-
+            .push(Rc::new(RefCell::new(Self::expand_expr(expr)?)));
         Ok(self.eval_recursive()?)
     }
 }
