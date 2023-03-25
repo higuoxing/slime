@@ -1,9 +1,6 @@
-mod builtins;
-mod error;
-mod object;
-mod parser;
-mod tokenizer;
-mod vm;
+use lambda::object;
+use lambda::parser;
+use lambda::vm;
 
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result};
@@ -25,9 +22,9 @@ fn main() -> Result<()> {
                             }
                             _ => println!("\n; Value: {}\n", result),
                         },
-                        Err(e) => println!("{:?}", e),
+                        Err(e) => println!("{}", e),
                     },
-                    Err(e) => println!("{:?}", e),
+                    Err(e) => println!("{}", e),
                 }
             }
             Err(ReadlineError::Interrupted) => {

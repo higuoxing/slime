@@ -225,7 +225,15 @@ fn parse_object_recursive<'a>(
                         curr_token.column(),
                     ));
                 }
-                curr_token = tokens[*token_cursor];
+
+                if *token_cursor < token_len {
+                    curr_token = tokens[*token_cursor];
+                } else {
+                    return Err(Errors::ExpectMoreToken(
+                        curr_token.line(),
+                        curr_token.column(),
+                    ));
+                }
             }
 
             if curr_token.kind() == TokenKind::Dot {
