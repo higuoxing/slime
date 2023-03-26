@@ -96,17 +96,26 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 //      The procedure takes N or more arguments.
 fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let lambda_body = Object::cons_to_vec(expr.clone())?;
-    if lambda_body.len() != 2 {
+    if lambda_body.len() < 2 {
         return Err(Errors::RuntimeException(format!(
             "'LAMBDA' should be followed by a list of arguments and a function body"
         )));
     }
 
+    let mut tail = Object::Nil;
+    for body_expr in lambda_body[1..].iter() {
+        tail = Object::Cons {
+            car: body_expr.clone(),
+            cdr: Rc::new(RefCell::new(tail)),
+        };
+    }
+    tail = Object::make_begin(Object::reverse_list(tail));
+
     match &*lambda_body[0].clone().borrow() {
         // Any.
         Object::Symbol(ref formal) => Ok(Object::Lambda {
             formals: Rc::new(RefCell::new(LambdaFormal::Any(formal.clone()))),
-            body: lambda_body[1].clone(),
+            body: Rc::new(RefCell::new(tail)),
         }),
         Object::Cons { .. } => {
             let mut curr_cell = lambda_body[0].clone();
@@ -132,11 +141,11 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
             match last_symbol {
                 Some(last_sym) => Ok(Object::Lambda {
                     formals: Rc::new(RefCell::new(LambdaFormal::AtLeastN(formals, last_sym))),
-                    body: lambda_body[1].clone(),
+                    body: Rc::new(RefCell::new(tail)),
                 }),
                 None => Ok(Object::Lambda {
                     formals: Rc::new(RefCell::new(LambdaFormal::Fixed(formals))),
-                    body: lambda_body[1].clone(),
+                    body: Rc::new(RefCell::new(tail)),
                 }),
             }
         }
@@ -1292,6 +1301,13 @@ mod tests {
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(m.eval(parse_program("x").unwrap()).unwrap(), Object::Int(4));
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("((lambda (x) (+ 1 x) (+ 1 x)) 1)").unwrap())
+                .unwrap(),
+            Object::Int(2)
+        );
         assert_eq!(m.stack.len(), 0);
     }
 }
