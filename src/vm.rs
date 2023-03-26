@@ -660,30 +660,78 @@ impl Machine {
                     // Since we didn't expand expressions inside (quasiquote ..), we should
                     // identify these special symbols here.
                     Object::Symbol(ref symbol_name) => {
-                        let evaluated_cdr =
-                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?;
-
-                        if let Object::EvaluatedUnquoteSplice(_) = evaluated_cdr {
-                            return Err(Errors::RuntimeException(String::from(
-                                "Invalid context for using 'UNQUOTE-SPLICING'",
-                            )));
-                        }
-
                         match symbol_name.to_uppercase().as_str() {
-                            "QUASIQUOTE" => Ok(Object::make_quasiquote(evaluated_cdr)),
+                            "QUASIQUOTE" => {
+                                let arg = Object::cons_to_vec(cdr.clone())?;
+                                if arg.len() != 1 {
+                                    return Err(Errors::RuntimeException(String::from(
+                                        "Ill-formed syntax",
+                                    )));
+                                }
+                                Ok(Object::make_quasiquote(self.eval_quasiquote_expr(
+                                    arg[0].clone(),
+                                    quasiquote_dep + 1,
+                                )?))
+                            }
                             "UNQUOTE" => {
+                                let arg = Object::cons_to_vec(cdr.clone())?;
+                                if arg.len() != 1 {
+                                    return Err(Errors::RuntimeException(String::from(
+                                        "Ill-formed syntax",
+                                    )));
+                                }
                                 if quasiquote_dep == 1 {
-                                    Ok(evaluated_cdr)
+                                    Ok(self
+                                        .eval_quasiquote_expr(arg[0].clone(), quasiquote_dep - 1)?)
                                 } else {
                                     // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
-                                    Ok(Object::make_unquote(evaluated_cdr))
+                                    Ok(Object::make_unquote(self.eval_quasiquote_expr(
+                                        arg[0].clone(),
+                                        quasiquote_dep - 1,
+                                    )?))
                                 }
                             }
-                            "QUOTE" => Ok(Object::Quote(cdr.clone())),
-                            "UNQUOTE-SPLICING" => todo!(),
+                            "QUOTE" => {
+                                let arg = Object::cons_to_vec(cdr.clone())?;
+                                if arg.len() != 1 {
+                                    return Err(Errors::RuntimeException(String::from(
+                                        "Ill-formed syntax",
+                                    )));
+                                }
+                                Ok(Object::Quote(arg[0].clone()))
+                            }
+                            "UNQUOTE-SPLICING" => {
+                                let arg = Object::cons_to_vec(cdr.clone())?;
+                                if arg.len() != 1 {
+                                    return Err(Errors::RuntimeException(String::from(
+                                        "Ill-formed syntax",
+                                    )));
+                                }
+
+                                if quasiquote_dep == 1 {
+                                    let result = self
+                                        .eval_quasiquote_expr(arg[0].clone(), quasiquote_dep - 1)?;
+                                    // Check if the result is a list.
+                                    if !result.is_cons() {
+                                        Err(Errors::RuntimeException(String::from(
+                                            "'UNQUOTE-SPLICING' must be evaluated to list",
+                                        )))
+                                    } else {
+                                        Ok(Object::make_evaluated_unquotesplice(result))
+                                    }
+                                } else {
+                                    // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
+                                    Ok(Object::make_unquotesplice(self.eval_quasiquote_expr(
+                                        arg[0].clone(),
+                                        quasiquote_dep - 1,
+                                    )?))
+                                }
+                            }
                             _ => Ok(Object::Cons {
                                 car: car.clone(),
-                                cdr: Rc::new(RefCell::new(evaluated_cdr)),
+                                cdr: Rc::new(RefCell::new(
+                                    self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?,
+                                )),
                             }),
                         }
                     }
@@ -1130,6 +1178,44 @@ mod tests {
         assert_eq!(
             m.eval(parse_program("`,`,1").unwrap()).unwrap(),
             Object::Int(1)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("`(,@'(1 2 3))").unwrap()).unwrap(),
+            Object::make_cons(
+                Object::Int(1),
+                Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
+            )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(quasiquote (,@'(1 2 3)))").unwrap())
+                .unwrap(),
+            Object::make_cons(
+                Object::Int(1),
+                Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
+            )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(quasiquote ((unquote-splicing '(1 2 3))))").unwrap())
+                .unwrap(),
+            Object::make_cons(
+                Object::Int(1),
+                Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                )
+            )
         );
         assert_eq!(m.stack.len(), 0);
     }
