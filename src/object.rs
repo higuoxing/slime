@@ -217,6 +217,7 @@ impl Object {
             Object::Real(n) => format!("{}", n),
             Object::String(s) => format!("\"{}\"", s),
             Object::Symbol(_) => self.symbol_name(),
+            Object::Quote(ref q) => format!("(quote {})", q.borrow().to_string()),
             _ => todo!(),
         }
     }

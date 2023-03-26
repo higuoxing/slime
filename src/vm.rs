@@ -617,7 +617,7 @@ impl Machine {
                 self.eval_builtin_func(builtin_func.clone(), cdr.clone())
             }
             ref o => Err(Errors::RuntimeException(format!(
-                "Object '{:?}' is not callable",
+                "Object '{}' is not callable",
                 o
             ))),
         }
