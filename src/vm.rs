@@ -211,6 +211,26 @@ fn make_quasiquote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     Ok(Object::Quasiquote(args[0].clone()))
 }
 
+fn make_set_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let set_body = Object::cons_to_vec(expr)?;
+    if set_body.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "'SET' should be followed by a symbol and an expression"
+        )));
+    }
+
+    if !set_body[0].borrow().is_symbol() {
+        return Err(Errors::RuntimeException(format!(
+            "'SET' should be followed by a symbol and an expression"
+        )));
+    }
+
+    Ok(Object::Set(
+        set_body[0].clone().borrow().symbol_name(),
+        set_body[1].clone(),
+    ))
+}
+
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
@@ -347,6 +367,32 @@ impl Machine {
         Ok((Object::Nil, None))
     }
 
+    // Evaluate the 'set!' expr and modify the environment.
+    fn eval_set_expr(
+        &mut self,
+        symbol_name: &str,
+        expr: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        match self.resolve_symbol(symbol_name) {
+            Ok(sym) => {
+                self.stack.push(expr);
+                let new_val = self.eval_recursive()?;
+                *sym.borrow_mut() = new_val;
+                Ok((Object::Nil, None))
+            }
+            _ => Err(Errors::RuntimeException(format!(
+                "Symbol '{}' is not defined",
+                symbol_name,
+            ))),
+        }
+    }
+
     fn eval_callable_symbol(
         &mut self,
         symbol_name: &str,
@@ -368,7 +414,7 @@ impl Machine {
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
             )),
-            "DEFINE-MACRO" => todo!(),
+            "DEFINE-SYNTAX" => todo!(),
             "IF" => Ok((
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_if_expr(expr)?))),
@@ -388,6 +434,10 @@ impl Machine {
             "QUASIQUOTE" => Ok((
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_quasiquote_expr(expr)?))),
+            )),
+            "SET!" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_set_expr(expr)?))),
             )),
             "UNQUOTE" => Err(Errors::RuntimeException(String::from(
                 "'UNQUOTE' should be used inside (QUASIQUOTE ..) expression",
@@ -842,6 +892,9 @@ impl Machine {
             Object::Define(ref symbol_name, ref expr) => {
                 self.eval_define_expr(symbol_name.as_str(), expr.clone())
             }
+            Object::Set(ref symbol_name, ref expr) => {
+                self.eval_set_expr(symbol_name.as_str(), expr.clone())
+            }
             Object::If {
                 ref condition,
                 ref then,
@@ -1217,6 +1270,28 @@ mod tests {
                 )
             )
         );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(
+                parse_program("(define x 3) (define (foo) (begin (define x 4) x)) (foo)").unwrap()
+            )
+            .unwrap(),
+            Object::Int(4)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(m.eval(parse_program("x").unwrap()).unwrap(), Object::Int(3));
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(define (bar) (begin (set! x 4) x)) (bar)").unwrap())
+                .unwrap(),
+            Object::Int(4)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(m.eval(parse_program("x").unwrap()).unwrap(), Object::Int(4));
         assert_eq!(m.stack.len(), 0);
     }
 }

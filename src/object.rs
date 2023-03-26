@@ -49,6 +49,7 @@ pub enum Object {
         otherwise: Rc<RefCell<Object>>,
     },
     Define(String, Rc<RefCell<Object>>),
+    Set(String, Rc<RefCell<Object>>),
     Lambda {
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
