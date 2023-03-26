@@ -294,6 +294,20 @@ fn parse_object_recursive<'a>(
                 token_cursor,
             )?))
         }
+        TokenKind::BackQuote => {
+            *token_cursor += 1;
+            Ok(Object::make_quasiquote(parse_object_recursive(
+                tokens,
+                token_cursor,
+            )?))
+        }
+        TokenKind::Comma => {
+            *token_cursor += 1;
+            Ok(Object::make_unquote(parse_object_recursive(
+                tokens,
+                token_cursor,
+            )?))
+        }
         _ => {
             panic!("Not implemented!");
         }

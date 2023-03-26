@@ -37,6 +37,8 @@ pub enum Object {
         car: Rc<RefCell<Object>>,
         cdr: Rc<RefCell<Object>>,
     },
+    Quasiquote(Rc<RefCell<Object>>),
+    Unquote(Rc<RefCell<Object>>),
     Quote(Rc<RefCell<Object>>),
     // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
@@ -74,6 +76,14 @@ impl Object {
 
     pub fn make_quote(object: Object) -> Object {
         Object::Quote(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_quasiquote(object: Object) -> Object {
+        Object::Quasiquote(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_unquote(object: Object) -> Object {
+        Object::Unquote(Rc::new(RefCell::new(object)))
     }
 
     pub fn make_char(char_code: u32, bucky_bits: u32) -> Object {
@@ -217,6 +227,8 @@ impl Object {
             Object::Real(n) => format!("{}", n),
             Object::String(s) => format!("\"{}\"", s),
             Object::Symbol(_) => self.symbol_name(),
+            Object::Quasiquote(ref q) => format!("(quasiquote {})", q.borrow().to_string()),
+            Object::Unquote(ref unq) => format!("(unquote {})", unq.borrow().to_string()),
             Object::Quote(ref q) => format!("(quote {})", q.borrow().to_string()),
             _ => todo!(),
         }

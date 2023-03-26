@@ -203,6 +203,14 @@ fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     Ok(Object::Quote(args[0].clone()))
 }
 
+fn make_quasiquote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let args = Object::cons_to_vec(expr)?;
+    if args.len() != 1 {
+        return Err(Errors::RuntimeException(format!("Ill-formed syntax")));
+    }
+    Ok(Object::Quasiquote(args[0].clone()))
+}
+
 pub struct Machine {
     // FIXME: The current implementation of env is not correct.
     env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
@@ -377,6 +385,13 @@ impl Machine {
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_quote_expr(expr)?))),
             )),
+            "QUASIQUOTE" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_quasiquote_expr(expr)?))),
+            )),
+            "UNQUOTE" => Err(Errors::RuntimeException(String::from(
+                "'UNQUOTE' should be used inside (QUASIQUOTE ..) expression",
+            ))),
             _ => {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
@@ -623,6 +638,84 @@ impl Machine {
         }
     }
 
+    // Evaluate the quasiquote expression.
+    fn eval_quasiquote_expr(
+        &mut self,
+        curr_expr: Rc<RefCell<Object>>,
+        quasiquote_dep: i64,
+    ) -> Result<Object, Errors> {
+        if quasiquote_dep == 0 {
+            self.stack.push(curr_expr);
+            self.eval_recursive()
+        } else if quasiquote_dep < 0 {
+            Err(Errors::RuntimeException(String::from(
+                "UNQUOTE should be used within (quasiquote ..) expression",
+            )))
+        } else {
+            match &*curr_expr.clone().borrow() {
+                Object::Cons { ref car, ref cdr } => match &*car.clone().borrow() {
+                    // Since we didn't expand expressions inside (quasiquote ..), we should
+                    // identify these special symbols here.
+                    Object::Symbol(ref symbol_name) => match symbol_name.to_uppercase().as_str() {
+                        "QUASIQUOTE" => Ok(Object::make_quasiquote(
+                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep + 1)?,
+                        )),
+                        "UNQUOTE" => {
+                            if quasiquote_dep == 1 {
+                                Ok(self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep - 1)?)
+                            } else {
+                                // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
+                                Ok(Object::make_unquote(
+                                    self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep - 1)?,
+                                ))
+                            }
+                        }
+                        "QUOTE" => Ok(Object::Quote(cdr.clone())),
+                        _ => Ok(Object::Cons {
+                            car: car.clone(),
+                            cdr: Rc::new(RefCell::new(
+                                self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?,
+                            )),
+                        }),
+                    },
+                    _ => Ok(Object::Cons {
+                        car: Rc::new(RefCell::new(
+                            self.eval_quasiquote_expr(car.clone(), quasiquote_dep)?,
+                        )),
+                        cdr: Rc::new(RefCell::new(
+                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?,
+                        )),
+                    }),
+                },
+                Object::Quasiquote(ref quasiquoted) => Ok(Object::make_quasiquote(
+                    self.eval_quasiquote_expr(quasiquoted.clone(), quasiquote_dep + 1)?,
+                )),
+                Object::Unquote(ref unquoted) => {
+                    if quasiquote_dep == 1 {
+                        Ok(self.eval_quasiquote_expr(unquoted.clone(), quasiquote_dep - 1)?)
+                    } else {
+                        // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
+                        Ok(Object::make_unquote(self.eval_quasiquote_expr(
+                            unquoted.clone(),
+                            quasiquote_dep - 1,
+                        )?))
+                    }
+                }
+                atom @ Object::Bool(_)
+                | atom @ Object::Char { .. }
+                | atom @ Object::Int(_)
+                | atom @ Object::Nil
+                | atom @ Object::Quote(_)
+                | atom @ Object::Real(_)
+                | atom @ Object::String(_) => Ok(atom.clone()),
+                ref x => panic!(
+                    "Unexpected expression '{}' in (QUASIQUOTE ...) expression",
+                    x.to_string()
+                ),
+            }
+        }
+    }
+
     // Evaluate the current expression, dispatch the current expression to
     // appropriate 'eval' function.
     fn eval_current_expr(
@@ -649,6 +742,16 @@ impl Machine {
             Object::Symbol(ref symbol_name) => {
                 let resolved_sym = self.resolve_symbol(symbol_name.as_str())?.borrow().clone();
                 Ok((resolved_sym, None))
+            }
+            Object::Quasiquote(ref quasiquoted_expr) => Ok((
+                self.eval_quasiquote_expr(quasiquoted_expr.clone(), 1)?,
+                None,
+            )),
+            Object::Unquote(_) => {
+                // This is unlikely to happend, but we have to add it to silence compiler warnings.
+                Err(Errors::RuntimeException(String::from(
+                    "'UNQUOTE' should be used within (quasiquote ..) expression",
+                )))
             }
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
             Object::Let {
@@ -932,6 +1035,30 @@ mod tests {
             )
             .unwrap(),
             Object::Int(24)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("`(+ 1 ,(+ 2 3))").unwrap()).unwrap(),
+            Object::make_cons(
+                Object::Symbol(String::from("+")),
+                Object::make_cons(
+                    Object::Int(1),
+                    Object::make_cons(Object::Int(5), Object::Nil)
+                )
+            ),
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("``,,1").unwrap()).unwrap(),
+            Object::make_quasiquote(Object::make_unquote(Object::Int(1)))
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("`,`,1").unwrap()).unwrap(),
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
     }
