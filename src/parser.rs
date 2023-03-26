@@ -193,8 +193,15 @@ fn parse_object_recursive<'a>(
     token_cursor: &mut usize,
 ) -> Result<Object, Errors> {
     let token_len = tokens.len();
-    let curr_token = tokens[*token_cursor];
 
+    if *token_cursor >= token_len {
+        return Err(Errors::ExpectMoreToken(
+            tokens[*token_cursor - 1].line(),
+            tokens[*token_cursor - 1].column(),
+        ));
+    }
+
+    let curr_token = tokens[*token_cursor];
     match curr_token.kind() {
         TokenKind::Dot => Err(Errors::UnexpectedToken(
             curr_token.line(),
@@ -303,10 +310,29 @@ fn parse_object_recursive<'a>(
         }
         TokenKind::Comma => {
             *token_cursor += 1;
-            Ok(Object::make_unquote(parse_object_recursive(
-                tokens,
-                token_cursor,
-            )?))
+
+            // Look one more token ahead.
+            if *token_cursor >= token_len {
+                return Err(Errors::ExpectMoreToken(
+                    curr_token.line(),
+                    curr_token.column(),
+                ));
+            }
+
+            let curr_token = tokens[*token_cursor];
+            match curr_token.kind() {
+                TokenKind::At => {
+                    *token_cursor += 1;
+                    Ok(Object::make_unquotesplice(parse_object_recursive(
+                        tokens,
+                        token_cursor,
+                    )?))
+                }
+                _ => Ok(Object::make_unquote(parse_object_recursive(
+                    tokens,
+                    token_cursor,
+                )?)),
+            }
         }
         _ => {
             panic!("Not implemented!");

@@ -392,6 +392,9 @@ impl Machine {
             "UNQUOTE" => Err(Errors::RuntimeException(String::from(
                 "'UNQUOTE' should be used inside (QUASIQUOTE ..) expression",
             ))),
+            "UNQUOTE-SPLICING" => Err(Errors::RuntimeException(String::from(
+                "'UNQUOTE-SPLICING' should be used inside (QUASIQUOTE ..) expression",
+            ))),
             _ => {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
@@ -656,36 +659,73 @@ impl Machine {
                 Object::Cons { ref car, ref cdr } => match &*car.clone().borrow() {
                     // Since we didn't expand expressions inside (quasiquote ..), we should
                     // identify these special symbols here.
-                    Object::Symbol(ref symbol_name) => match symbol_name.to_uppercase().as_str() {
-                        "QUASIQUOTE" => Ok(Object::make_quasiquote(
-                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep + 1)?,
-                        )),
-                        "UNQUOTE" => {
-                            if quasiquote_dep == 1 {
-                                Ok(self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep - 1)?)
-                            } else {
-                                // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
-                                Ok(Object::make_unquote(
-                                    self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep - 1)?,
-                                ))
-                            }
+                    Object::Symbol(ref symbol_name) => {
+                        let evaluated_cdr =
+                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?;
+
+                        if let Object::EvaluatedUnquoteSplice(_) = evaluated_cdr {
+                            return Err(Errors::RuntimeException(String::from(
+                                "Invalid context for using 'UNQUOTE-SPLICING'",
+                            )));
                         }
-                        "QUOTE" => Ok(Object::Quote(cdr.clone())),
-                        _ => Ok(Object::Cons {
-                            car: car.clone(),
-                            cdr: Rc::new(RefCell::new(
-                                self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?,
-                            )),
-                        }),
-                    },
-                    _ => Ok(Object::Cons {
-                        car: Rc::new(RefCell::new(
-                            self.eval_quasiquote_expr(car.clone(), quasiquote_dep)?,
-                        )),
-                        cdr: Rc::new(RefCell::new(
-                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?,
-                        )),
-                    }),
+
+                        match symbol_name.to_uppercase().as_str() {
+                            "QUASIQUOTE" => Ok(Object::make_quasiquote(evaluated_cdr)),
+                            "UNQUOTE" => {
+                                if quasiquote_dep == 1 {
+                                    Ok(evaluated_cdr)
+                                } else {
+                                    // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
+                                    Ok(Object::make_unquote(evaluated_cdr))
+                                }
+                            }
+                            "QUOTE" => Ok(Object::Quote(cdr.clone())),
+                            "UNQUOTE-SPLICING" => todo!(),
+                            _ => Ok(Object::Cons {
+                                car: car.clone(),
+                                cdr: Rc::new(RefCell::new(evaluated_cdr)),
+                            }),
+                        }
+                    }
+                    _ => {
+                        let evaluated_car =
+                            self.eval_quasiquote_expr(car.clone(), quasiquote_dep)?;
+                        let evaluated_cdr =
+                            self.eval_quasiquote_expr(cdr.clone(), quasiquote_dep)?;
+                        match evaluated_cdr {
+                            Object::EvaluatedUnquoteSplice(_) => {
+                                return Err(Errors::RuntimeException(String::from(
+                                    "Invalid context for using 'UNQUOTE-SPLICING'",
+                                )));
+                            }
+                            _ => match evaluated_car {
+                                Object::EvaluatedUnquoteSplice(mut unqspl) => {
+                                    // If this expression is evaluated from unquote-splicing, we should expand it here.
+                                    let mut tail = Object::Nil;
+
+                                    while let Object::Cons { ref car, ref cdr } =
+                                        &*unqspl.clone().borrow()
+                                    {
+                                        tail = Object::Cons {
+                                            car: car.clone(),
+                                            cdr: Rc::new(RefCell::new(tail)),
+                                        };
+                                        unqspl = cdr.clone();
+                                    }
+
+                                    if !evaluated_cdr.is_nil() {
+                                        tail = Object::make_cons(evaluated_cdr, tail);
+                                    }
+
+                                    Ok(Object::reverse_list(tail))
+                                }
+                                _ => Ok(Object::Cons {
+                                    car: Rc::new(RefCell::new(evaluated_car)),
+                                    cdr: Rc::new(RefCell::new(evaluated_cdr)),
+                                }),
+                            },
+                        }
+                    }
                 },
                 Object::Quasiquote(ref quasiquoted) => Ok(Object::make_quasiquote(
                     self.eval_quasiquote_expr(quasiquoted.clone(), quasiquote_dep + 1)?,
@@ -696,6 +736,26 @@ impl Machine {
                     } else {
                         // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
                         Ok(Object::make_unquote(self.eval_quasiquote_expr(
+                            unquoted.clone(),
+                            quasiquote_dep - 1,
+                        )?))
+                    }
+                }
+                Object::UnquoteSplice(ref unquoted) => {
+                    if quasiquote_dep == 1 {
+                        let result =
+                            self.eval_quasiquote_expr(unquoted.clone(), quasiquote_dep - 1)?;
+                        // Check if the result is a list.
+                        if !result.is_cons() {
+                            Err(Errors::RuntimeException(String::from(
+                                "'UNQUOTE-SPLICING' must be evaluated to list",
+                            )))
+                        } else {
+                            Ok(Object::make_evaluated_unquotesplice(result))
+                        }
+                    } else {
+                        // Unquote expressions nested in multiple levels of quasiquote shouldn't be evaluated.
+                        Ok(Object::make_unquotesplice(self.eval_quasiquote_expr(
                             unquoted.clone(),
                             quasiquote_dep - 1,
                         )?))
@@ -753,6 +813,15 @@ impl Machine {
                     "'UNQUOTE' should be used within (quasiquote ..) expression",
                 )))
             }
+            Object::UnquoteSplice(_) => {
+                // This is unlikely to happend, but we have to add it to silence compiler warnings.
+                Err(Errors::RuntimeException(String::from(
+                    "'UNQUOTE-SPLICING' should be used within (quasiquote ..) expression",
+                )))
+            }
+            Object::EvaluatedUnquoteSplice(_) => {
+                panic!("Unexpected Object::EvaluatedUnquoteSplice node")
+            }
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
             Object::Let {
                 ref bindings,
@@ -784,7 +853,9 @@ impl Machine {
                     curr_expr = next_expr.clone();
                     continue;
                 }
-                None => return Ok(result.0),
+                None => {
+                    return Ok(result.0);
+                }
             }
         }
     }
@@ -795,7 +866,7 @@ impl Machine {
         self.stack
             .push(Rc::new(RefCell::new(/* expr */ expanded_expr)));
 
-        Ok(self.eval_recursive()?)
+        self.eval_recursive()
     }
 }
 

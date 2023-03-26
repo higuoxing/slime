@@ -39,6 +39,7 @@ pub enum Object {
     },
     Quasiquote(Rc<RefCell<Object>>),
     Unquote(Rc<RefCell<Object>>),
+    UnquoteSplice(Rc<RefCell<Object>>),
     Quote(Rc<RefCell<Object>>),
     // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
@@ -60,6 +61,9 @@ pub enum Object {
         /* Function prototype */ Rc<BuiltinFuncSig>,
         /* Index */ usize,
     ),
+    // Partially evaluated UnquoteSplice node.
+    // This node is expanded in eval_quasiquote_expr().
+    EvaluatedUnquoteSplice(Rc<RefCell<Object>>),
 }
 
 impl Object {
@@ -84,6 +88,14 @@ impl Object {
 
     pub fn make_unquote(object: Object) -> Object {
         Object::Unquote(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_unquotesplice(object: Object) -> Object {
+        Object::UnquoteSplice(Rc::new(RefCell::new(object)))
+    }
+
+    pub fn make_evaluated_unquotesplice(object: Object) -> Object {
+        Object::EvaluatedUnquoteSplice(Rc::new(RefCell::new(object)))
     }
 
     pub fn make_char(char_code: u32, bucky_bits: u32) -> Object {
@@ -230,6 +242,9 @@ impl Object {
             Object::Quasiquote(ref q) => format!("(quasiquote {})", q.borrow().to_string()),
             Object::Unquote(ref unq) => format!("(unquote {})", unq.borrow().to_string()),
             Object::Quote(ref q) => format!("(quote {})", q.borrow().to_string()),
+            Object::UnquoteSplice(ref unqspl) => {
+                format!("(unquote-splicing {})", unqspl.borrow().to_string())
+            }
             _ => todo!(),
         }
     }
