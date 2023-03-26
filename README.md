@@ -20,9 +20,13 @@ target/release/lsi
 This will start a REPL (Read-Eval-Print Loop) where you can enter Scheme expressions and see their evaluation results. For example:
 
 ```scheme
-=> (+ 1 2)
+=> (define (fact n) (if (= n 1) 1 (* n (fact (- n 1)))))
 
-; Value: 3
+; Value: ()
+
+=> (fact 4)
+
+; Value: 24
 ```
 
 You can also run Scheme programs from files by passing the file name as an argument:
