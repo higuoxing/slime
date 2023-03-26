@@ -995,5 +995,15 @@ mod tests {
             Object::Nil,
         );
         assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(
+                parse_program("(define (fact n) (if (= n 1) 1 (* n (fact (- n 1))))) (fact 4)")
+                    .unwrap()
+            )
+            .unwrap(),
+            Object::Int(24)
+        );
+        assert_eq!(m.stack.len(), 0);
     }
 }
