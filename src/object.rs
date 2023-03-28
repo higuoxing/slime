@@ -153,6 +153,25 @@ impl Object {
         }
     }
 
+    pub fn get_as_float(&self) -> f64 {
+        match self {
+            Object::Int(v) => v.to_f64(),
+            Object::Real(v) => v.to_f64(),
+            _ => 0.0,
+        }
+    }
+
+    pub fn get_as_int(&self) -> Integer {
+        match self {
+            Object::Int(v) => v.clone(),
+            Object::Real(v) => match v.to_integer() {
+                Some(v) => v,
+                None => Integer::ZERO,
+            },
+            _ => Integer::ZERO,
+        }
+    }
+
     pub fn symbol_name(&self) -> String {
         match self {
             Object::Symbol(sym) => sym.clone(),
