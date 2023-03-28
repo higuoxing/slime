@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, LinkedList};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::builtins::{make_prelude_env, BuiltinFuncSig};
@@ -12,7 +12,7 @@ fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 }
 
 // Construct the 'define' expression from a expr.
-fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+fn make_define_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     // There're 3 forms of define.
     // 1) (define <variable> <expression>)
     // 2) (define (<variable> <formals>) <body>) which is equivalent to
@@ -53,6 +53,7 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         // Construct a lambda expression.
         let fun_name = fun_name_with_args[0].borrow().symbol_name();
         let lambda_expr = Object::Lambda {
+            env: env.clone(),
             formals: Rc::new(RefCell::new(LambdaFormal::Fixed(args))),
             body: define_body[1].clone(),
         };
@@ -94,7 +95,7 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 //      The procedure takes exactly the N number of arguments.
 // 3) (<variable1> <variable2> ... <variable<N-1>> . <variable<N>>)
 //      The procedure takes N or more arguments.
-fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+fn make_lambda_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let lambda_body = Object::cons_to_vec(expr.clone())?;
     if lambda_body.len() < 2 {
         return Err(Errors::RuntimeException(format!(
@@ -114,6 +115,7 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     match &*lambda_body[0].clone().borrow() {
         // Any.
         Object::Symbol(ref formal) => Ok(Object::Lambda {
+            env: env.clone(),
             formals: Rc::new(RefCell::new(LambdaFormal::Any(formal.clone()))),
             body: Rc::new(RefCell::new(tail)),
         }),
@@ -140,10 +142,12 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 
             match last_symbol {
                 Some(last_sym) => Ok(Object::Lambda {
+                    env: env.clone(),
                     formals: Rc::new(RefCell::new(LambdaFormal::AtLeastN(formals, last_sym))),
                     body: Rc::new(RefCell::new(tail)),
                 }),
                 None => Ok(Object::Lambda {
+                    env: env.clone(),
                     formals: Rc::new(RefCell::new(LambdaFormal::Fixed(formals))),
                     body: Rc::new(RefCell::new(tail)),
                 }),
@@ -194,28 +198,27 @@ fn make_set_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 }
 
 pub struct Machine {
-    // FIXME: The current implementation of env is not correct.
-    env: LinkedList<HashMap<String, Rc<RefCell<Object>>>>,
-    prelude: HashMap<String, (Rc<BuiltinFuncSig>, usize)>,
+    env: Rc<RefCell<Object>>,
     stack: Vec<Rc<RefCell<Object>>>,
 }
 
 impl Machine {
     pub fn new() -> Self {
-        // Prepare a new environment.
-        let mut env_list = LinkedList::new();
-        env_list.push_front(HashMap::new());
-
         Self {
-            env: env_list,
-            prelude: make_prelude_env(),
+            env: Rc::new(RefCell::new(Object::make_cons(
+                Object::Env(Rc::new(RefCell::new(make_prelude_env()))),
+                Object::Nil,
+            ))),
             stack: vec![],
         }
     }
 
     #[allow(unused)]
     pub fn reset(&mut self) {
-        self.env = LinkedList::new();
+        self.env = Rc::new(RefCell::new(Object::make_cons(
+            Object::Env(Rc::new(RefCell::new(make_prelude_env()))),
+            Object::Nil,
+        )));
         self.stack = vec![];
     }
 
@@ -223,38 +226,54 @@ impl Machine {
         Ok(expr)
     }
 
-    fn resolve_symbol(&self, sym: &str) -> Result<Rc<RefCell<Object>>, Errors> {
-        for node in self.env.iter() {
-            match node.get(sym) {
-                Some(v) => return Ok(v.clone()),
-                None => continue,
+    fn resolve_symbol(env: Rc<RefCell<Object>>, sym: &str) -> Result<Rc<RefCell<Object>>, Errors> {
+        let mut curr_env = env.clone();
+
+        while let Object::Cons { ref car, ref cdr } = &*curr_env.clone().borrow() {
+            if let Object::Env(ref symtab) = &*car.clone().borrow() {
+                match symtab.clone().borrow().get(sym) {
+                    Some(v) => return Ok(v.clone()),
+                    None => {
+                        curr_env = cdr.clone();
+                        continue;
+                    }
+                }
+            } else {
+                return Err(Errors::RuntimeException(format!(
+                    "Cannot resolve symbol: '{}'",
+                    sym
+                )));
             }
         }
 
-        match self.prelude.get(sym) {
-            Some((f, index)) => Ok(Rc::new(RefCell::new(Object::BuiltinFunc(
-                f.clone(),
-                *index,
-            )))),
-            None => Err(Errors::RuntimeException(format!(
-                "Cannot resolve symbol '{}'",
-                sym
-            ))),
-        }
+        return Err(Errors::RuntimeException(format!(
+            "Cannot resolve symbol: '{}'",
+            sym
+        )));
     }
 
     fn define_symbol(
-        &mut self,
-        env: &mut HashMap<String, Rc<RefCell<Object>>>,
+        env: Rc<RefCell<Object>>,
         sym: &str,
         val: Rc<RefCell<Object>>,
     ) -> Result<(), Errors> {
-        if let Some(v) = env.get_mut(sym) {
-            *v = val.clone();
-        } else {
-            env.insert(sym.to_string(), val.clone());
+        if let Object::Cons { ref car, .. } = &*env.clone().borrow() {
+            if let Object::Env(ref symtab) = &*car.clone().borrow() {
+                if symtab.borrow().contains_key(sym) {
+                    *symtab.clone().borrow_mut().get_mut(sym).unwrap() = val.clone();
+                    return Ok(());
+                } else {
+                    symtab
+                        .clone()
+                        .borrow_mut()
+                        .insert(sym.to_string(), val.clone());
+                    return Ok(());
+                }
+            }
         }
-        Ok(())
+
+        // Very unlikely to happend.
+        panic!("Cannot define symbol '{}' in the current env", sym);
     }
 
     // Evaluate the condition expression and returns the 'then' clause
@@ -322,10 +341,7 @@ impl Machine {
     > {
         self.stack.push(expr);
         let evaluated = Rc::new(RefCell::new(self.eval_recursive()?));
-        let mut curr_env = self.env.pop_front().unwrap();
-        self.define_symbol(&mut curr_env, symbol_name, evaluated)?;
-        self.env.push_front(curr_env);
-
+        Self::define_symbol(self.env.clone(), symbol_name, evaluated)?;
         Ok((Object::Nil, None))
     }
 
@@ -341,7 +357,7 @@ impl Machine {
         ),
         Errors,
     > {
-        match self.resolve_symbol(symbol_name) {
+        match Self::resolve_symbol(self.env.clone(), symbol_name) {
             Ok(sym) => {
                 self.stack.push(expr);
                 let new_val = self.eval_recursive()?;
@@ -374,7 +390,10 @@ impl Machine {
             )),
             "DEFINE" => Ok((
                 Object::Nil,
-                Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
+                Some(Rc::new(RefCell::new(make_define_expr(
+                    self.env.clone(),
+                    expr,
+                )?))),
             )),
             "DEFINE-SYNTAX" => todo!(),
             "IF" => Ok((
@@ -383,7 +402,12 @@ impl Machine {
             )),
             "LAMBDA" => Ok((
                 Object::Nil,
-                Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
+                // For closures, we need to capture the environment in which the
+                // closure is defined.
+                Some(Rc::new(RefCell::new(make_lambda_expr(
+                    self.env.clone(),
+                    expr,
+                )?))),
             )),
             "QUOTE" => Ok((
                 Object::Nil,
@@ -407,7 +431,7 @@ impl Machine {
                 // Try to evaluate sym.
                 // FIXME: This is not perfect ... but it works ...
                 // Try to improve it tomorrow!
-                match self.resolve_symbol(symbol_name) {
+                match Self::resolve_symbol(self.env.clone(), symbol_name) {
                     Ok(resolved_symbol) => Ok((
                         Object::Nil,
                         Some(Rc::new(RefCell::new(Object::Cons {
@@ -429,6 +453,7 @@ impl Machine {
 
     fn eval_lambda_expr(
         &mut self,
+        env: Rc<RefCell<Object>>,
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
         args: Rc<RefCell<Object>>,
@@ -454,18 +479,25 @@ impl Machine {
                 tail = Object::reverse_list(tail);
 
                 // Prepare a new env.
-                let mut new_env = HashMap::new();
-                self.define_symbol(
-                    &mut new_env,
+                let new_env = Rc::new(RefCell::new(Object::Cons {
+                    car: Rc::new(RefCell::new(Object::Env(Rc::new(RefCell::new(
+                        HashMap::new(),
+                    ))))),
+                    cdr: env.clone(),
+                }));
+                Self::define_symbol(
+                    new_env.clone(),
                     symbol_name.as_str(),
                     Rc::new(RefCell::new(tail)),
                 )?;
-                self.env.push_front(new_env);
+
+                let old_env = self.env.clone();
+                self.env = new_env.clone();
 
                 // Evaluate the lambda expr.
                 self.stack.push(body.clone());
                 let result = self.eval_recursive()?;
-                self.env.pop_front();
+                self.env = old_env;
 
                 Ok((result, None))
             }
@@ -476,26 +508,32 @@ impl Machine {
                 }
 
                 // Prepare a new env.
-                let mut new_env = HashMap::new();
+                let new_env = Rc::new(RefCell::new(Object::Cons {
+                    car: Rc::new(RefCell::new(Object::Env(Rc::new(RefCell::new(
+                        HashMap::new(),
+                    ))))),
+                    cdr: env.clone(),
+                }));
 
                 for arg_index in 0..symbols.len() {
                     self.stack.push(passed_args_vec[arg_index].clone());
                     let evaluated = self.eval_recursive()?;
 
-                    self.define_symbol(
-                        &mut new_env,
+                    Self::define_symbol(
+                        new_env.clone(),
                         symbols[arg_index].as_str(),
                         Rc::new(RefCell::new(evaluated)),
                     )?;
                 }
 
-                self.env.push_front(new_env);
+                let old_env = self.env.clone();
+                self.env = new_env;
                 self.stack.push(body.clone());
                 let result = self.eval_recursive()?;
 
                 // Pop the env since we use it to pass arguments to the lambda expression,
                 // and we should clean it up.
-                self.env.pop_front();
+                self.env = old_env;
 
                 Ok((result, None))
             }
@@ -509,7 +547,12 @@ impl Machine {
                 }
 
                 // Prepare a new env.
-                let mut new_env = HashMap::new();
+                let new_env = Rc::new(RefCell::new(Object::Cons {
+                    car: Rc::new(RefCell::new(Object::Env(Rc::new(RefCell::new(
+                        HashMap::new(),
+                    ))))),
+                    cdr: env.clone(),
+                }));
 
                 let mut tail = Object::Nil;
 
@@ -518,8 +561,8 @@ impl Machine {
                     let evaluated = self.eval_recursive()?;
 
                     if arg_index < symbols.len() {
-                        self.define_symbol(
-                            &mut new_env,
+                        Self::define_symbol(
+                            new_env.clone(),
                             symbols[arg_index].as_str(),
                             Rc::new(RefCell::new(evaluated)),
                         )?;
@@ -529,16 +572,19 @@ impl Machine {
                 }
 
                 // The last argument.
-                self.define_symbol(
-                    &mut new_env,
+                Self::define_symbol(
+                    new_env.clone(),
                     last_symbol.as_str(),
                     Rc::new(RefCell::new(Object::reverse_list(tail))),
                 )?;
 
-                self.env.push_front(new_env);
+                let old_env = self.env.clone();
+
+                self.env = new_env;
                 self.stack.push(body.clone());
                 let result = self.eval_recursive()?;
-                self.env.pop_front();
+
+                self.env = old_env;
 
                 Ok((result, None))
             }
@@ -587,11 +633,12 @@ impl Machine {
                 self.eval_callable_symbol(symbol_name.as_str(), cdr)
             }
             Object::Lambda {
+                ref env,
                 ref formals,
                 ref body,
             } => {
                 // Apply lambda expression against 'cdr'.
-                self.eval_lambda_expr(formals.clone(), body.clone(), cdr.clone())
+                self.eval_lambda_expr(env.clone(), formals.clone(), body.clone(), cdr.clone())
             }
             Object::Cons { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
@@ -826,7 +873,9 @@ impl Machine {
                 ref otherwise,
             } => self.eval_if_expr(condition.clone(), then.clone(), otherwise.clone()),
             Object::Symbol(ref symbol_name) => {
-                let resolved_sym = self.resolve_symbol(symbol_name.as_str())?.borrow().clone();
+                let resolved_sym = Self::resolve_symbol(self.env.clone(), symbol_name.as_str())?
+                    .borrow()
+                    .clone();
                 Ok((resolved_sym, None))
             }
             Object::Quasiquote(ref quasiquoted_expr) => Ok((
@@ -858,7 +907,11 @@ impl Machine {
             | atom @ Object::Real(_)
             | atom @ Object::BuiltinFunc(_, _)
             | atom @ Object::Nil
-            | atom @ Object::Unspecified => return Ok((atom.clone(), None)),
+            | atom @ Object::Unspecified => Ok((atom.clone(), None)),
+            ref o => Err(Errors::RuntimeException(format!(
+                "Unrecognized object: '{:?}'",
+                o
+            ))),
         }
     }
 
@@ -980,14 +1033,10 @@ mod tests {
             Object::Nil
         );
         assert_eq!(m.stack.len(), 0);
-        assert!(m
-            .env
-            .front()
-            .unwrap()
-            .get("foo")
-            .unwrap()
-            .borrow()
-            .eq(&Object::Int(1)));
+        assert_eq!(
+            m.eval(parse_program("foo").unwrap()).unwrap(),
+            Object::Int(1)
+        );
 
         assert_eq!(m.eval(parse_program("1").unwrap()).unwrap(), Object::Int(1));
         assert_eq!(
@@ -1015,7 +1064,7 @@ mod tests {
             Object::Bool(false)
         );
         assert_eq!(m.stack.len(), 0);
-        assert_eq!(m.env.len(), 1);
+        assert_eq!(Object::cons_to_vec(m.env.clone()).unwrap().len(), 1);
 
         assert_eq!(
             m.eval(parse_program("(define foo #f) foo").unwrap())
@@ -1023,7 +1072,7 @@ mod tests {
             Object::Bool(false)
         );
         assert_eq!(m.stack.len(), 0);
-        assert_eq!(m.env.len(), 1);
+        assert_eq!(Object::cons_to_vec(m.env.clone()).unwrap().len(), 1);
 
         assert_eq!(
             m.eval(parse_program("(define (foo) #f) (foo)").unwrap())
@@ -1207,5 +1256,16 @@ mod tests {
             Object::Int(2)
         );
         assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(
+                parse_program("(define x 1) (define (f x) (g 2)) (define (g y) (+ x y)) (f 5)")
+                    .unwrap()
+            )
+            .unwrap(),
+            Object::Int(3)
+        );
+        assert_eq!(m.stack.len(), 0);
+        assert_eq!(Object::cons_to_vec(m.env.clone()).unwrap().len(), 1);
     }
 }

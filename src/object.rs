@@ -2,6 +2,7 @@ use crate::builtins::BuiltinFuncSig;
 use crate::error::Errors;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::default::Default;
 use std::fmt;
 use std::rc::Rc;
@@ -51,6 +52,7 @@ pub enum Object {
     Define(String, Rc<RefCell<Object>>),
     Set(String, Rc<RefCell<Object>>),
     Lambda {
+        env: Rc<RefCell<Object>>,
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
     },
@@ -61,6 +63,9 @@ pub enum Object {
     // Partially evaluated UnquoteSplice node.
     // This node is expanded in eval_quasiquote_expr().
     EvaluatedUnquoteSplice(Rc<RefCell<Object>>),
+    // The environment node, used for retrieving symbols during
+    // interpreting the AST and it shouldn't be evaluated.
+    Env(Rc<RefCell<HashMap<String, Rc<RefCell<Object>>>>>),
 }
 
 impl Object {

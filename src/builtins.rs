@@ -15,15 +15,21 @@ const BUILTIN_FUNCTIONS: &[(&str, BuiltinFuncSig)] = &[
     ("*", builtin_numeric_times as BuiltinFuncSig),
 ];
 
-pub fn make_prelude_env() -> HashMap<String, (Rc<BuiltinFuncSig>, usize)> {
-    let mut builtins: HashMap<String, (Rc<BuiltinFuncSig>, usize)> = HashMap::new();
+pub fn make_prelude_env() -> HashMap<String, Rc<RefCell<Object>>> {
+    let mut prelude_env: HashMap<String, Rc<RefCell<Object>>> = HashMap::new();
 
     // Initialize the builtin function table.
     for (fun_index, (fun_name, fun_impl)) in BUILTIN_FUNCTIONS.iter().enumerate() {
-        builtins.insert(fun_name.to_string(), (Rc::new(*fun_impl), fun_index));
+        prelude_env.insert(
+            fun_name.to_string(),
+            Rc::new(RefCell::new(Object::BuiltinFunc(
+                Rc::new(*fun_impl),
+                fun_index,
+            ))),
+        );
     }
 
-    builtins
+    prelude_env
 }
 
 fn builtin_cons(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
