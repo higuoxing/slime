@@ -7,6 +7,9 @@ use std::default::Default;
 use std::fmt;
 use std::rc::Rc;
 
+use rug::Float;
+use rug::Integer;
+
 #[derive(Debug, PartialEq)]
 pub enum LambdaFormal {
     // Any number of arguments.
@@ -23,8 +26,8 @@ pub enum Object {
     #[default]
     Unspecified,
     Nil,
-    Real(f64),
-    Int(i64),
+    Real(Float),
+    Int(Integer),
     Bool(bool),
     // An MIT Scheme character consists of a code part and a bucky bits part.
     // See: https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
@@ -107,6 +110,14 @@ impl Object {
         }
     }
 
+    pub fn make_int(n: i64) -> Object {
+        Object::Int(Integer::from(n))
+    }
+
+    pub fn make_real(n: f64) -> Object {
+        Object::Real(Float::with_val(53, n))
+    }
+
     pub fn is_cons(&self) -> bool {
         match self {
             Object::Cons { .. } => true,
@@ -124,6 +135,20 @@ impl Object {
     pub fn is_symbol(&self) -> bool {
         match self {
             Object::Symbol(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        match self {
+            Object::Int(_) | Object::Real(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_integer(&self) -> bool {
+        match self {
+            Object::Int(_) => true,
             _ => false,
         }
     }
@@ -268,11 +293,11 @@ mod tests {
     fn test_cons_to_vec() {
         assert_eq!(
             Object::cons_to_vec(Rc::new(RefCell::new(Object::make_cons(
-                Object::Int(1),
+                Object::make_int(1),
                 Object::Nil
             ))))
             .unwrap(),
-            vec![Rc::new(RefCell::new(Object::Int(1)))]
+            vec![Rc::new(RefCell::new(Object::make_int(1)))]
         )
     }
 }

@@ -1,3 +1,5 @@
+use rug::{Float, Integer};
+
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
@@ -31,7 +33,7 @@ fn parse_number<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result
     let curr_token = tokens[*token_cursor];
     match curr_token.kind() {
         TokenKind::Int => {
-            if let Ok(n) = curr_token.literal().parse::<i64>() {
+            if let Ok(n) = Integer::from_str_radix(curr_token.literal(), 10) {
                 // Advance the cursor.
                 *token_cursor += 1;
                 Ok(Object::Int(n))
@@ -43,10 +45,10 @@ fn parse_number<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result
             }
         }
         TokenKind::Float => {
-            if let Ok(f) = curr_token.literal().parse::<f64>() {
+            if let Ok(f) = Float::parse(curr_token.literal()) {
                 // Advance the cursor.
                 *token_cursor += 1;
-                Ok(Object::Real(f))
+                Ok(Object::Real(Float::with_val(53, f)))
             } else {
                 Err(Errors::UnexpectedToken(
                     curr_token.line(),
@@ -380,10 +382,10 @@ mod tests {
         assert_eq!(
             parse_program("(1 2 3)").unwrap(),
             Object::make_cons(
-                Object::Int(1),
+                Object::make_int(1),
                 Object::make_cons(
-                    Object::Int(2),
-                    Object::make_cons(Object::Int(3), Object::Nil)
+                    Object::make_int(2),
+                    Object::make_cons(Object::make_int(3), Object::Nil)
                 )
             )
         );
@@ -391,11 +393,11 @@ mod tests {
         assert_eq!(
             parse_program("(1 (2 3))").unwrap(),
             Object::make_cons(
-                Object::Int(1),
+                Object::make_int(1),
                 Object::make_cons(
                     Object::make_cons(
-                        Object::Int(2),
-                        Object::make_cons(Object::Int(3), Object::Nil)
+                        Object::make_int(2),
+                        Object::make_cons(Object::make_int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -406,18 +408,18 @@ mod tests {
             parse_program("(1 -2 -3) (+1 -2 -3)").unwrap(),
             Object::make_begin(Object::make_cons(
                 Object::make_cons(
-                    Object::Int(1),
+                    Object::make_int(1),
                     Object::make_cons(
-                        Object::Int(-2),
-                        Object::make_cons(Object::Int(-3), Object::Nil)
+                        Object::make_int(-2),
+                        Object::make_cons(Object::make_int(-3), Object::Nil)
                     )
                 ),
                 Object::make_cons(
                     Object::make_cons(
-                        Object::Int(1),
+                        Object::make_int(1),
                         Object::make_cons(
-                            Object::Int(-2),
-                            Object::make_cons(Object::Int(-3), Object::Nil)
+                            Object::make_int(-2),
+                            Object::make_cons(Object::make_int(-3), Object::Nil)
                         )
                     ),
                     Object::Nil
@@ -428,11 +430,11 @@ mod tests {
         assert_eq!(
             parse_program("(1 (-2.5 3))").unwrap(),
             Object::make_cons(
-                Object::Int(1),
+                Object::make_int(1),
                 Object::make_cons(
                     Object::make_cons(
-                        Object::Real(-2.5),
-                        Object::make_cons(Object::Int(3), Object::Nil)
+                        Object::make_real(-2.5),
+                        Object::make_cons(Object::make_int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -442,9 +444,9 @@ mod tests {
         assert_eq!(
             parse_program("(1 -2 #t)").unwrap(),
             Object::make_cons(
-                Object::Int(1),
+                Object::make_int(1),
                 Object::make_cons(
-                    Object::Int(-2),
+                    Object::make_int(-2),
                     Object::make_cons(Object::Bool(true), Object::Nil)
                 )
             )
@@ -456,8 +458,8 @@ mod tests {
                 Object::Bool(false),
                 Object::make_cons(
                     Object::make_cons(
-                        Object::Real(-2.5),
-                        Object::make_cons(Object::Int(3), Object::Nil)
+                        Object::make_real(-2.5),
+                        Object::make_cons(Object::make_int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -468,7 +470,7 @@ mod tests {
             parse_program("(#f . (-2.5 . 3))").unwrap(),
             Object::make_cons(
                 Object::Bool(false),
-                Object::make_cons(Object::Real(-2.5), Object::Int(3))
+                Object::make_cons(Object::make_real(-2.5), Object::make_int(3))
             )
         );
 
@@ -477,8 +479,8 @@ mod tests {
             Object::make_cons(
                 Object::Symbol(String::from("+")),
                 Object::make_cons(
-                    Object::Int(1),
-                    Object::make_cons(Object::Int(3), Object::Nil)
+                    Object::make_int(1),
+                    Object::make_cons(Object::make_int(3), Object::Nil)
                 )
             )
         );
@@ -531,7 +533,7 @@ mod tests {
             ))
         );
 
-        assert_eq!(parse_program("1").unwrap(), Object::Int(1));
+        assert_eq!(parse_program("1").unwrap(), Object::make_int(1));
         assert_eq!(
             parse_program("(define foo 1) foo").unwrap(),
             Object::make_begin(Object::make_cons(
@@ -539,7 +541,7 @@ mod tests {
                     Object::Symbol(String::from("define")),
                     Object::make_cons(
                         Object::Symbol(String::from("foo")),
-                        Object::make_cons(Object::Int(1), Object::Nil)
+                        Object::make_cons(Object::make_int(1), Object::Nil)
                     )
                 ),
                 Object::make_cons(Object::Symbol(String::from("foo")), Object::Nil)
@@ -552,7 +554,7 @@ mod tests {
                 Object::Symbol(String::from("define")),
                 Object::make_cons(
                     Object::Symbol(String::from("foo")),
-                    Object::make_cons(Object::Int(1), Object::Nil)
+                    Object::make_cons(Object::make_int(1), Object::Nil)
                 )
             ),)
         );

@@ -5,8 +5,12 @@ use std::rc::Rc;
 use crate::error::Errors;
 use crate::object::Object;
 
+use rug::Float;
+use rug::Integer;
+
 pub type BuiltinFuncSig = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
+// FIXME: Numeric operations are not accurate.
 const BUILTIN_FUNCTIONS: &[(&str, BuiltinFuncSig)] = &[
     ("cons", builtin_cons as BuiltinFuncSig),
     ("=", builtin_numeric_eq as BuiltinFuncSig),
@@ -49,14 +53,14 @@ fn builtin_numeric_eq(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let args = Object::cons_to_vec(expr)?;
     if args.len() != 2 {
         return Err(Errors::RuntimeException(format!(
-            "'+' expects 2 arguments, got {} arguments",
+            "'=' expects 2 arguments, got {} arguments",
             args.len()
         )));
     }
 
     let arg1 = match &*args[0].borrow() {
-        Object::Int(n) => *n as f64,
-        Object::Real(n) => *n,
+        Object::Int(n) => n.to_f64(),
+        Object::Real(n) => n.to_f64(),
         _ => {
             return Err(Errors::RuntimeException(String::from(
                 "Unexpected object for argument 1",
@@ -65,12 +69,12 @@ fn builtin_numeric_eq(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     };
 
     let arg2 = match &*args[1].borrow() {
-        Object::Int(n) => *n as f64,
-        Object::Real(n) => *n,
+        Object::Int(n) => n.to_f64(),
+        Object::Real(n) => n.to_f64(),
         _ => {
             return Err(Errors::RuntimeException(String::from(
                 "Unexpected object for argument 2",
-            )))
+            )));
         }
     };
 
@@ -85,10 +89,10 @@ fn builtin_numeric_plus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     for arg in args.iter() {
         match &*arg.borrow() {
             Object::Int(n) => {
-                result += *n as f64;
+                result += n.to_f64();
             }
             Object::Real(n) => {
-                result += *n;
+                result += n.to_f64();
                 return_float = true;
             }
             _ => {
@@ -100,9 +104,15 @@ fn builtin_numeric_plus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     }
 
     if return_float {
-        Ok(Object::Real(result))
+        Ok(Object::Real(Float::with_val(53, result)))
     } else {
-        Ok(Object::Int(result as i64))
+        match Integer::from_f64(result) {
+            Some(v) => Ok(Object::Int(v)),
+            None => Err(Errors::RuntimeException(format!(
+                "Cannot convert '{}' to integer",
+                result
+            ))),
+        }
     }
 }
 
@@ -121,16 +131,16 @@ fn builtin_numeric_minus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         match &*arg.borrow() {
             Object::Int(n) => {
                 if arg_index == 0 && args.len() != 1 {
-                    result = *n as f64;
+                    result = n.to_f64();
                 } else {
-                    result -= *n as f64;
+                    result -= n.to_f64();
                 }
             }
             Object::Real(n) => {
                 if arg_index == 0 && args.len() != 1 {
-                    result = *n;
+                    result = n.to_f64();
                 } else {
-                    result -= *n;
+                    result -= n.to_f64();
                 }
                 return_float = true;
             }
@@ -143,9 +153,15 @@ fn builtin_numeric_minus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     }
 
     if return_float {
-        Ok(Object::Real(result))
+        Ok(Object::Real(Float::with_val(53, result)))
     } else {
-        Ok(Object::Int(result as i64))
+        match Integer::from_f64(result) {
+            Some(v) => Ok(Object::Int(v)),
+            None => Err(Errors::RuntimeException(format!(
+                "Cannot convert '{}' to integer",
+                result
+            ))),
+        }
     }
 }
 
@@ -157,10 +173,10 @@ fn builtin_numeric_times(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     for arg in args.iter() {
         match &*arg.borrow() {
             Object::Int(n) => {
-                result *= *n as f64;
+                result *= n.to_f64();
             }
             Object::Real(n) => {
-                result *= *n;
+                result *= n.to_f64();
                 return_float = true;
             }
             _ => {
@@ -172,8 +188,14 @@ fn builtin_numeric_times(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     }
 
     if return_float {
-        Ok(Object::Real(result))
+        Ok(Object::Real(Float::with_val(53, result)))
     } else {
-        Ok(Object::Int(result as i64))
+        match Integer::from_f64(result) {
+            Some(v) => Ok(Object::Int(v)),
+            None => Err(Errors::RuntimeException(format!(
+                "Cannot convert '{}' to integer",
+                result
+            ))),
+        }
     }
 }
