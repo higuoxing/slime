@@ -1,5 +1,7 @@
 # lambda-scheme
 
+[![Build and test.](https://github.com/higuoxing/lambda-scheme/actions/workflows/rust.yml/badge.svg)](https://github.com/higuoxing/lambda-scheme/actions/workflows/rust.yml)
+
 This is a simple implementation of a Scheme interpreter written in Rust. The interpreter supports a subset of the Scheme language, including basic arithmetic, boolean operations, conditionals, and function definition and application.
 
 ## Build
