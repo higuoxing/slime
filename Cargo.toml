@@ -6,4 +6,3 @@ edition = "2021"
 [dependencies]
 rustyline = "11.0.0" ## Repl support.
 thiserror = "1.0.39" ## Error handling.
-rug       = "1.19"   ## Numeric types.

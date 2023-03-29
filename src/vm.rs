@@ -965,7 +965,7 @@ mod tests {
         assert_eq!(
             // "(begin 1 2)"
             m.eval(parse_program("(begin 1 2)").unwrap()).unwrap(),
-            Object::make_int(2)
+            Object::Int(2)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -980,51 +980,51 @@ mod tests {
             // "(begin (begin 1 2 3))"
             m.eval(parse_program("(begin (BEGIN 1 2 3))").unwrap())
                 .unwrap(),
-            Object::make_int(3)
+            Object::Int(3)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(begin (begin 1))").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if #t 1 2)").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if #f 1 2)").unwrap()).unwrap(),
-            Object::make_int(2)
+            Object::Int(2)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if 0 1 2)").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if 1 1 2)").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if #f (if #t 4 5) 2)").unwrap())
                 .unwrap(),
-            Object::make_int(2)
+            Object::Int(2)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(if #t (if #t 4 5) 2)").unwrap())
                 .unwrap(),
-            Object::make_int(4)
+            Object::Int(4)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1035,22 +1035,19 @@ mod tests {
         assert_eq!(m.stack.len(), 0);
         assert_eq!(
             m.eval(parse_program("foo").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
 
-        assert_eq!(
-            m.eval(parse_program("1").unwrap()).unwrap(),
-            Object::make_int(1)
-        );
+        assert_eq!(m.eval(parse_program("1").unwrap()).unwrap(), Object::Int(1));
         assert_eq!(
             m.eval(parse_program("foo").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
 
         assert_eq!(
             m.eval(parse_program("(if (begin 1 2 #f) 2 3)").unwrap())
                 .unwrap(),
-            Object::make_int(3)
+            Object::Int(3)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1086,7 +1083,7 @@ mod tests {
 
         assert_eq!(
             m.eval(parse_program("(+ 1 2 3 4 5)").unwrap()).unwrap(),
-            Object::make_int(15)
+            Object::Int(15)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1105,7 +1102,7 @@ mod tests {
         assert_eq!(
             m.eval(parse_program("((if #f + cons) 3 4)").unwrap())
                 .unwrap(),
-            Object::make_cons(Object::make_int(3), Object::make_int(4))
+            Object::make_cons(Object::Int(3), Object::Int(4))
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1115,8 +1112,8 @@ mod tests {
             Object::make_cons(
                 Object::Symbol(String::from("+")),
                 Object::make_cons(
-                    Object::make_int(1),
-                    Object::make_cons(Object::make_int(2), Object::Nil)
+                    Object::Int(1),
+                    Object::make_cons(Object::Int(2), Object::Nil)
                 )
             )
         );
@@ -1126,10 +1123,10 @@ mod tests {
             m.eval(parse_program("((lambda x x) 1 2 3)").unwrap())
                 .unwrap(),
             Object::make_cons(
-                Object::make_int(1),
+                Object::Int(1),
                 Object::make_cons(
-                    Object::make_int(2),
-                    Object::make_cons(Object::make_int(3), Object::Nil)
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
                 )
             )
         );
@@ -1138,7 +1135,7 @@ mod tests {
         assert_eq!(
             m.eval(parse_program("((lambda (a . b) a) 1 2 3)").unwrap())
                 .unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1146,8 +1143,8 @@ mod tests {
             m.eval(parse_program("((lambda (a . b) b) 1 2 3)").unwrap())
                 .unwrap(),
             Object::make_cons(
-                Object::make_int(2),
-                Object::make_cons(Object::make_int(3), Object::Nil)
+                Object::Int(2),
+                Object::make_cons(Object::Int(3), Object::Nil)
             )
         );
         assert_eq!(m.stack.len(), 0);
@@ -1165,7 +1162,7 @@ mod tests {
                     .unwrap()
             )
             .unwrap(),
-            Object::make_int(24)
+            Object::Int(24)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1174,8 +1171,8 @@ mod tests {
             Object::make_cons(
                 Object::Symbol(String::from("+")),
                 Object::make_cons(
-                    Object::make_int(1),
-                    Object::make_cons(Object::make_int(5), Object::Nil)
+                    Object::Int(1),
+                    Object::make_cons(Object::Int(5), Object::Nil)
                 )
             ),
         );
@@ -1183,23 +1180,23 @@ mod tests {
 
         assert_eq!(
             m.eval(parse_program("``,,1").unwrap()).unwrap(),
-            Object::make_quasiquote(Object::make_unquote(Object::make_int(1)))
+            Object::make_quasiquote(Object::make_unquote(Object::Int(1)))
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("`,`,1").unwrap()).unwrap(),
-            Object::make_int(1)
+            Object::Int(1)
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("`(,@'(1 2 3))").unwrap()).unwrap(),
             Object::make_cons(
-                Object::make_int(1),
+                Object::Int(1),
                 Object::make_cons(
-                    Object::make_int(2),
-                    Object::make_cons(Object::make_int(3), Object::Nil)
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
                 )
             )
         );
@@ -1209,10 +1206,10 @@ mod tests {
             m.eval(parse_program("(quasiquote (,@'(1 2 3)))").unwrap())
                 .unwrap(),
             Object::make_cons(
-                Object::make_int(1),
+                Object::Int(1),
                 Object::make_cons(
-                    Object::make_int(2),
-                    Object::make_cons(Object::make_int(3), Object::Nil)
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
                 )
             )
         );
@@ -1222,10 +1219,10 @@ mod tests {
             m.eval(parse_program("(quasiquote ((unquote-splicing '(1 2 3))))").unwrap())
                 .unwrap(),
             Object::make_cons(
-                Object::make_int(1),
+                Object::Int(1),
                 Object::make_cons(
-                    Object::make_int(2),
-                    Object::make_cons(Object::make_int(3), Object::Nil)
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
                 )
             )
         );
@@ -1236,33 +1233,27 @@ mod tests {
                 parse_program("(define x 3) (define (foo) (begin (define x 4) x)) (foo)").unwrap()
             )
             .unwrap(),
-            Object::make_int(4)
+            Object::Int(4)
         );
         assert_eq!(m.stack.len(), 0);
 
-        assert_eq!(
-            m.eval(parse_program("x").unwrap()).unwrap(),
-            Object::make_int(3)
-        );
+        assert_eq!(m.eval(parse_program("x").unwrap()).unwrap(), Object::Int(3));
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("(define (bar) (begin (set! x 4) x)) (bar)").unwrap())
                 .unwrap(),
-            Object::make_int(4)
+            Object::Int(4)
         );
         assert_eq!(m.stack.len(), 0);
 
-        assert_eq!(
-            m.eval(parse_program("x").unwrap()).unwrap(),
-            Object::make_int(4)
-        );
+        assert_eq!(m.eval(parse_program("x").unwrap()).unwrap(), Object::Int(4));
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             m.eval(parse_program("((lambda (x) (+ 1 x) (+ 1 x)) 1)").unwrap())
                 .unwrap(),
-            Object::make_int(2)
+            Object::Int(2)
         );
         assert_eq!(m.stack.len(), 0);
 
@@ -1272,7 +1263,7 @@ mod tests {
                     .unwrap()
             )
             .unwrap(),
-            Object::make_int(3)
+            Object::Int(3)
         );
         assert_eq!(m.stack.len(), 0);
         assert_eq!(Object::cons_to_vec(m.env.clone()).unwrap().len(), 1);
