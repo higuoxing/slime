@@ -160,6 +160,53 @@ fn make_lambda_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Resu
     }
 }
 
+// Construct the 'let' expression from a expr.
+// FIXME: 'let' should be implemented by macro???
+fn make_let_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+    let expr_vec = Object::cons_to_vec(expr)?;
+    if expr_vec.len() != 2 {
+        return Err(Errors::RuntimeException(format!(
+            "Unexpected number of arguments for 'LET'"
+        )));
+    }
+
+    let bindings_expr = Object::cons_to_vec(expr_vec[0].clone())?;
+    let body_expr = expr_vec[1].clone();
+    let mut binding_symbols = vec![];
+
+    for bexpr in bindings_expr.iter() {
+        match *bexpr.borrow() {
+            Object::Cons { ref car, ref cdr } => match &*car.borrow() {
+                Object::Symbol(ref symbol_name) => match &*cdr.borrow() {
+                    Object::Cons { ref car, .. } => {
+                        binding_symbols.push((symbol_name.clone(), car.clone()))
+                    }
+                    _ => {
+                        return Err(Errors::RuntimeException(format!(
+                            "Unexpected number of arguments for 'LET'"
+                        )))
+                    }
+                },
+                _ => {
+                    return Err(Errors::RuntimeException(format!(
+                        "Unexpected number of arguments for 'LET'"
+                    )))
+                }
+            },
+            _ => {
+                return Err(Errors::RuntimeException(format!(
+                    "Unexpected number of arguments for 'LET'"
+                )))
+            }
+        }
+    }
+
+    Ok(Object::Let {
+        bindings: binding_symbols,
+        body: body_expr,
+    })
+}
+
 // Construct the 'quote' expression.
 fn make_quote_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let args = Object::cons_to_vec(expr)?;
@@ -409,6 +456,10 @@ impl Machine {
                     expr,
                 )?))),
             )),
+            "LET" => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(make_let_expr(expr)?))),
+            )),
             "QUOTE" => Ok((
                 Object::Nil,
                 Some(Rc::new(RefCell::new(make_quote_expr(expr)?))),
@@ -589,6 +640,47 @@ impl Machine {
                 Ok((result, None))
             }
         }
+    }
+
+    fn eval_let_expr(
+        &mut self,
+        bindings: &Vec<(String, Rc<RefCell<Object>>)>,
+        body: Rc<RefCell<Object>>,
+    ) -> Result<
+        (
+            /* curr_result */ Object,
+            /* next_expr */ Option<Rc<RefCell<Object>>>,
+        ),
+        Errors,
+    > {
+        // Prepare a new env.
+        let new_env = Rc::new(RefCell::new(Object::Cons {
+            car: Rc::new(RefCell::new(Object::Env(Rc::new(RefCell::new(
+                HashMap::new(),
+            ))))),
+            cdr: self.env.clone(),
+        }));
+
+        for binding in bindings {
+            self.stack.push(binding.1.clone());
+            let evaluated = self.eval_recursive()?;
+            Self::define_symbol(
+                new_env.clone(),
+                binding.0.as_str(),
+                Rc::new(RefCell::new(evaluated)),
+            )?;
+        }
+
+        let old_env = self.env.clone();
+        self.env = new_env.clone();
+
+        self.stack.push(body);
+        let result = self.eval_recursive()?;
+
+        // Pop the current env, since we don't need it again.
+        self.env = old_env;
+
+        Ok((result, None))
     }
 
     fn eval_builtin_func(
@@ -898,6 +990,10 @@ impl Machine {
                 panic!("Unexpected Object::EvaluatedUnquoteSplice node")
             }
             Object::Quote(ref quoted_expr) => Ok((quoted_expr.borrow().clone(), None)),
+            Object::Let {
+                ref bindings,
+                ref body,
+            } => self.eval_let_expr(bindings, body.clone()),
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
@@ -1116,6 +1212,20 @@ mod tests {
                     Object::make_cons(Object::Int(2), Object::Nil)
                 )
             )
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(let ((x 2) (y 3)) (* x y))").unwrap())
+                .unwrap(),
+            Object::Int(6)
+        );
+        assert_eq!(m.stack.len(), 0);
+
+        assert_eq!(
+            m.eval(parse_program("(let ((x 2) (y 3)) (let ((x 7) (z (+ x y))) (* z x)))").unwrap())
+                .unwrap(),
+            Object::Int(35)
         );
         assert_eq!(m.stack.len(), 0);
 

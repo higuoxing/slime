@@ -56,6 +56,10 @@ pub enum Object {
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
     },
+    Let {
+        bindings: Vec<(String, Rc<RefCell<Object>>)>,
+        body: Rc<RefCell<Object>>,
+    },
     BuiltinFunc(
         /* Function prototype */ Rc<BuiltinFuncSig>,
         /* Index */ usize,
