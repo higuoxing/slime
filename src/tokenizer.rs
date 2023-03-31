@@ -120,7 +120,7 @@ impl<'a> Tokenizer<'a> {
             } else {
                 // No more characters, put one character back.
                 *program_char_indices = prev_program_char_indices.clone();
-                return Err(Errors::Unknown);
+                return Err(Errors::ExpectMoreToken);
             }
         }
 
@@ -180,7 +180,7 @@ impl<'a> Tokenizer<'a> {
         } else {
             // Put back one character.
             *program_char_indices = prev_program_char_indices.clone();
-            Err(Errors::Unknown)
+            Err(Errors::ExpectMoreToken)
         }
     }
 

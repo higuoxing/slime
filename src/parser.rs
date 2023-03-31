@@ -195,10 +195,7 @@ fn parse_object_recursive<'a>(
     let token_len = tokens.len();
 
     if *token_cursor >= token_len {
-        return Err(Errors::ExpectMoreToken(
-            tokens[*token_cursor - 1].line(),
-            tokens[*token_cursor - 1].column(),
-        ));
+        return Err(Errors::ExpectMoreToken);
     }
 
     let curr_token = tokens[*token_cursor];
@@ -213,10 +210,7 @@ fn parse_object_recursive<'a>(
             // Advance the cursor of token, eat '('.
             *token_cursor += 1;
             if *token_cursor >= token_len {
-                return Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ));
+                return Err(Errors::ExpectMoreToken);
             }
 
             let mut curr_token = tokens[*token_cursor];
@@ -236,10 +230,7 @@ fn parse_object_recursive<'a>(
                 if *token_cursor < token_len {
                     curr_token = tokens[*token_cursor];
                 } else {
-                    return Err(Errors::ExpectMoreToken(
-                        curr_token.line(),
-                        curr_token.column(),
-                    ));
+                    return Err(Errors::ExpectMoreToken);
                 }
             }
 
@@ -247,10 +238,7 @@ fn parse_object_recursive<'a>(
                 // Advance the cursor.
                 *token_cursor += 1;
                 if *token_cursor >= token_len {
-                    return Err(Errors::UnexpectedToken(
-                        curr_token.line(),
-                        curr_token.column(),
-                    ));
+                    return Err(Errors::ExpectMoreToken);
                 }
 
                 curr_token = tokens[*token_cursor];
@@ -263,10 +251,7 @@ fn parse_object_recursive<'a>(
                             // The cursor is incremented in parse_object_recursive(), we should
                             // check the bound and update the curr_token.
                             if *token_cursor >= token_len {
-                                return Err(Errors::UnexpectedToken(
-                                    curr_token.line(),
-                                    curr_token.column(),
-                                ));
+                                return Err(Errors::ExpectMoreToken);
                             }
                             curr_token = tokens[*token_cursor];
                         }
@@ -313,10 +298,7 @@ fn parse_object_recursive<'a>(
 
             // Look one more token ahead.
             if *token_cursor >= token_len {
-                return Err(Errors::ExpectMoreToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ));
+                return Err(Errors::ExpectMoreToken);
             }
 
             let curr_token = tokens[*token_cursor];
@@ -334,9 +316,10 @@ fn parse_object_recursive<'a>(
                 )?)),
             }
         }
-        _ => {
-            panic!("Not implemented!");
-        }
+        _ => Err(Errors::UnexpectedToken(
+            curr_token.line(),
+            curr_token.column(),
+        )),
     }
 }
 

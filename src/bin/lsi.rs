@@ -19,23 +19,37 @@ struct Cli {
 fn repl_loop() -> Result<(), Box<dyn Error>> {
     let mut rl = DefaultEditor::new()?;
     let mut lisp_machine = vm::Machine::new();
-
+    let mut script = String::from("");
     loop {
-        let input = rl.readline("=> ");
+        let input = if script.is_empty() {
+            rl.readline("=> ")
+        } else {
+            rl.readline(".. ")
+        };
+
         match input {
             Ok(line) => {
-                let _ = rl.add_history_entry(line.as_str())?;
-                match parser::parse_program(line.as_str()) {
+                script += line.as_str();
+                script += "\n";
+                match parser::parse_program(script.as_str()) {
                     Ok(parsed_ast) => match lisp_machine.eval(parsed_ast) {
                         Ok(result) => match result {
                             object::Object::Unspecified => {
                                 println!("\n; Unspecified return value\n")
                             }
+
                             _ => println!("\n; Value: {}\n", result),
                         },
                         Err(e) => println!("{}", e),
                     },
-                    Err(e) => println!("{}", e),
+                    Err(e) => match e {
+                        Errors::ExpectMoreToken => {
+                            continue;
+                        }
+                        _ => {
+                            println!("{}", e)
+                        }
+                    },
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -51,6 +65,8 @@ fn repl_loop() -> Result<(), Box<dyn Error>> {
                 break;
             }
         }
+
+        script.clear();
     }
 
     Ok(())
