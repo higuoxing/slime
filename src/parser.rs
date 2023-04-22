@@ -1,8 +1,7 @@
-use rug::{Float, Integer};
-
 use crate::error::Errors;
 use crate::object::Object;
-use crate::tokenizer::{Token, TokenKind, Tokenizer};
+use crate::tokenizer::{tokenize, Token, TokenKind};
+use rug::{Float, Integer};
 
 // See https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
 // for syntax and semantics of MIT Scheme.
@@ -326,8 +325,7 @@ fn parse_object_recursive<'a>(
 }
 
 pub fn parse_program(program: &str) -> Result<Object, Errors> {
-    let tokenizer = Tokenizer::new(program)?;
-    let tokens = tokenizer.tokens();
+    let tokens = &tokenize(program)?;
     let token_len = tokens.len();
     let mut token_cursor = 0;
     let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
