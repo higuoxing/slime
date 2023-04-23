@@ -1,7 +1,5 @@
-use lazy_static::lazy_static;
-use regex::Regex;
-
 use crate::error::Errors;
+
 use std::str::CharIndices;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -31,7 +29,7 @@ pub struct Token<'a> {
 }
 
 impl<'a> Token<'a> {
-    pub fn from(literal: &'a str, line_number: i64, line_offset: i64, kind: TokenKind) -> Self {
+    pub fn new(literal: &'a str, line_number: i64, line_offset: i64, kind: TokenKind) -> Self {
         Self {
             literal,
             line: line_number,
@@ -57,220 +55,282 @@ impl<'a> Token<'a> {
     }
 }
 
-lazy_static! {
-    static ref TOKEN_MATCHERS: Vec<(Regex, TokenKind)> = vec![
-        (Regex::new("^#[t|f]$").unwrap(), TokenKind::Bool),
-        (Regex::new("^([+|-]?)([[:digit:]]+)$").unwrap(), TokenKind::Int),
-        (Regex::new("^([+|-]?)([[:digit:]]+)(\\.[[:digit:]]+)?$").unwrap(), TokenKind::Float),
-        (/* Identifier.
-          * https://www.gnu.org/software/mit-scheme/documentation/stable/mit-scheme-ref/Identifiers.html
-          */
-         Regex::new("^[^#,][^\\(\\);\"`\\|\\[\\]\\{\\}\\t\\ \\n\\r]*$").unwrap(), TokenKind::Symbol)
-    ];
-}
-
-// Definition for delimiters:
-//   https://www.gnu.org/software/mit-scheme/documentation/stable/mit-scheme-ref/Delimiters.html
-fn is_delimiter(ch: char) -> bool {
-    match ch {
-        '(' | ')' | ';' | '"' | '\'' | '`' | '|' | '[' | ']' | '{' | '}' | '\t' | ' ' | '\r'
-        | '\n' => true,
-        _ => false,
-    }
+#[derive(Debug, PartialEq)]
+pub struct Tokenizer<'a> {
+    program: &'a str,
+    tokens: Vec<Token<'a>>,
 }
 
 // FIXME: Try to make the lexer into an iterator.
-fn try_match_string_literal<'a>(
-    program: &'a str,
-    start: usize,
-    line_number: i64,
-    line_offset: i64,
-    curr_char: char,
-    program_char_indices: &mut CharIndices,
-) -> Result<(Token<'a>, i64), Errors> {
-    let mut strlen = curr_char.len_utf8();
-    while let Some((_, ch)) = program_char_indices.next() {
-        strlen += ch.len_utf8();
-        match ch {
-            '\\' => {
-                // Look a character ahead.
-                if let Some((_, ch)) = program_char_indices.next() {
-                    strlen += ch.len_utf8();
+impl<'a> Tokenizer<'a> {
+    fn try_match_string_literal(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        curr_char: char,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), Errors> {
+        let mut strlen = curr_char.len_utf8();
+        while let Some((_, ch)) = program_char_indices.next() {
+            strlen += ch.len_utf8();
+            match ch {
+                '\\' => {
+                    // Look a character ahead.
+                    if let Some((_, ch)) = program_char_indices.next() {
+                        strlen += ch.len_utf8();
+                        continue;
+                    } else {
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
+                    }
+                }
+                '"' => break,
+                _ => continue,
+            }
+        }
+        Ok((
+            Token::new(
+                &program[start..start + strlen],
+                line_number,
+                line_offset,
+                TokenKind::String,
+            ),
+            strlen as i64,
+        ))
+    }
+
+    fn try_match_number(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        mut curr_char: char,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), Errors> {
+        let mut digit_len = 0;
+        let mut is_float = false;
+        let prev_program_char_indices = program_char_indices.clone();
+
+        if curr_char == '+' || curr_char == '-' {
+            digit_len += curr_char.len_utf8();
+
+            // Look one character ahead.
+            if let Some((_, ch)) = program_char_indices.next() {
+                curr_char = ch;
+            } else {
+                // No more characters, put one character back.
+                *program_char_indices = prev_program_char_indices.clone();
+                return Err(Errors::ExpectMoreToken);
+            }
+        }
+
+        if curr_char.is_digit(10) {
+            // Try to parse it as number.
+            digit_len += curr_char.len_utf8();
+            let mut prev_program_char_indices = program_char_indices.clone();
+            while let Some((_, ch)) = program_char_indices.next() {
+                if ch.is_digit(10) {
+                    digit_len += ch.len_utf8();
+                    prev_program_char_indices = program_char_indices.clone();
                     continue;
                 } else {
-                    return Err(Errors::UnexpectedToken(line_number, line_offset));
+                    // Put back one character.
+                    *program_char_indices = prev_program_char_indices.clone();
+                    break;
                 }
             }
-            '"' => break,
-            _ => continue,
+
+            // Is this a float number?
+            prev_program_char_indices = program_char_indices.clone();
+            if let Some((_, ch)) = program_char_indices.next() {
+                if ch == '.' {
+                    digit_len += ch.len_utf8();
+                    is_float = true;
+
+                    while let Some((_, ch)) = program_char_indices.next() {
+                        if ch.is_digit(10) {
+                            digit_len += ch.len_utf8();
+                            prev_program_char_indices = program_char_indices.clone();
+                            continue;
+                        } else {
+                            // Put back one character.
+                            *program_char_indices = prev_program_char_indices.clone();
+                            break;
+                        }
+                    }
+                } else {
+                    // Put back one character.
+                    *program_char_indices = prev_program_char_indices.clone();
+                }
+            }
+
+            Ok((
+                Token::new(
+                    &program[start..start + digit_len],
+                    line_number,
+                    line_offset,
+                    if is_float {
+                        TokenKind::Float
+                    } else {
+                        TokenKind::Int
+                    },
+                ),
+                digit_len as i64,
+            ))
+        } else {
+            // Put back one character.
+            *program_char_indices = prev_program_char_indices.clone();
+            Err(Errors::ExpectMoreToken)
         }
     }
-    Ok((
-        Token::from(
-            &program[start..start + strlen],
-            line_number,
-            line_offset,
-            TokenKind::String,
-        ),
-        strlen as i64,
-    ))
-}
 
-pub fn tokenize(prog: &str) -> Result<Vec<Token>, Errors> {
-    let mut tokens = vec![];
-    let mut program_char_indices = prog.char_indices();
-    let mut line: i64 = 1;
-    let mut column: i64 = 1;
-
-    while let Some((start, ch)) = program_char_indices.next() {
-        // Firstly, match delimiters.
-        if ch == '\n' {
-            line += 1;
-            column = 1;
-            continue;
-        } else if ch == ' ' || ch == '\t' || ch == '\r' {
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == ';' {
-            // Skip comments.
-            while let Some((_, ch)) = program_char_indices.next() {
-                if ch == '\n' {
-                    column = 1;
-                    line += 1;
-                    break;
-                }
-            }
-            continue;
-        } else if ch == '(' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::LeftParen,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == ')' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::RightParen,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == '.' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::Dot,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == '\'' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::Quote,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == '`' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::BackQuote,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == ',' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::Comma,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
-        } else if ch == '@' {
-            tokens.push(Token::from(
-                &prog[start..start + ch.len_utf8()],
-                line,
-                column,
-                TokenKind::At,
-            ));
-            column += ch.len_utf8() as i64;
-            continue;
+    fn try_match_symbol(
+        program: &'a str,
+        start: usize,
+        line_number: i64,
+        line_offset: i64,
+        curr_char: char,
+        program_char_indices: &mut CharIndices,
+    ) -> Result<(Token<'a>, i64), Errors> {
+        let mut symbol_len = curr_char.len_utf8();
+        if !is_symbol(curr_char) {
+            return Err(Errors::UnexpectedToken(line_number, line_offset));
         }
-        if ch == '"' {
-            // Process string literal.
-            if let Ok((token, token_len)) =
-                try_match_string_literal(prog, start, line, column, ch, &mut program_char_indices)
-            {
-                tokens.push(token);
-                column += token_len;
+
+        let mut prev_program_char_indices = program_char_indices.clone();
+        while let Some((_, ch)) = program_char_indices.next() {
+            if is_symbol(ch) {
+                prev_program_char_indices = program_char_indices.clone();
+                symbol_len += ch.len_utf8();
                 continue;
             } else {
-                // Unlikely to happen.
-                panic!("Cannot parse string literal");
+                *program_char_indices = prev_program_char_indices.clone();
+                break;
             }
-        } else {
-            // Process tokens.
-            let save_program_char_indices1 = program_char_indices.clone();
-            let mut save_program_char_indices2 = program_char_indices.clone();
-            let mut end_ind = start;
-            let mut break_by_delimiter = false;
+        }
 
-            while let Some((ind, ch)) = program_char_indices.next() {
-                end_ind = ind;
-                if is_delimiter(ch) {
-                    break_by_delimiter = true;
-                    break;
+        Ok((
+            Token::new(
+                &program[start..start + symbol_len],
+                line_number,
+                line_offset,
+                TokenKind::Symbol,
+            ),
+            symbol_len as i64,
+        ))
+    }
+
+    pub fn tokenize(program: &'a str) -> Result<Vec<Token>, Errors> {
+        let mut tokens = vec![];
+        let mut program_char_indices = program.char_indices();
+        let mut line_number: i64 = 1;
+        let mut line_offset: i64 = 1;
+
+        while let Some((start, ch)) = program_char_indices.next() {
+            // Skip whitespaces.
+            if ch == '\n' {
+                line_number += 1;
+                line_offset = 1;
+                continue;
+            } else if ch == ' ' || ch == '\t' || ch == '\r' {
+                line_offset += ch.len_utf8() as i64;
+                continue;
+            } else if ch == ';' {
+                // Skip comments.
+                while let Some((_, ch)) = program_char_indices.next() {
+                    if ch == '\n' {
+                        line_offset = 1;
+                        line_number += 1;
+                        break;
+                    }
                 }
-                save_program_char_indices2 = program_char_indices.clone();
-            }
-
-            if !break_by_delimiter {
-                end_ind += 1;
-            }
-
-            let mut matched = false;
-            for tok_matcher in TOKEN_MATCHERS.iter() {
-                if tok_matcher.0.is_match(&prog[start..end_ind]) {
-                    tokens.push(Token::from(
-                        &prog[start..end_ind],
-                        line,
-                        column,
-                        tok_matcher.1,
-                    ));
-                    column += (end_ind - start) as i64;
-                    //                    println!("{} - {:?}", prog, &prog[start..end_ind]);
-                    matched = true;
-                    break;
-                }
-            }
-
-            if matched {
-                program_char_indices = save_program_char_indices2;
                 continue;
             }
-            program_char_indices = save_program_char_indices1;
 
+            // Process tokens.
             match ch {
+                '(' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::LeftParen,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                ')' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::RightParen,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                '.' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::Dot,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                '\'' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::Quote,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                '`' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::BackQuote,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                ',' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::Comma,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
+                '@' => {
+                    tokens.push(Token::new(
+                        &program[start..start + ch.len_utf8()],
+                        line_number,
+                        line_offset,
+                        TokenKind::At,
+                    ));
+                    line_offset += ch.len_utf8() as i64;
+                }
                 '#' => {
                     // Look one token ahead.
                     if let Some((_, ch)) = program_char_indices.next() {
                         if ch == '(' {
-                            tokens.push(Token::from(
-                                &prog[start..start + "#(".len()],
-                                line,
-                                column,
+                            tokens.push(Token::new(
+                                &program[start..start + "#(".len()],
+                                line_number,
+                                line_offset,
                                 TokenKind::HashLeftParen,
                             ));
-                            column += "#(".len() as i64;
+                            line_offset += "#(".len() as i64;
+                        } else if ch == 't' || ch == 'f' {
+                            tokens.push(Token::new(
+                                &program[start..start + "#t".len()],
+                                line_number,
+                                line_offset,
+                                TokenKind::Bool,
+                            ));
+                            line_offset += "#t".len() as i64;
                         } else if ch == '\\' {
                             // Char type.
                             let mut charlen = "#\\".len();
@@ -296,39 +356,103 @@ pub fn tokenize(prog: &str) -> Result<Vec<Token>, Errors> {
                                         }
                                     }
 
-                                    tokens.push(Token::from(
-                                        &prog[start..start + charlen],
-                                        line,
-                                        column,
+                                    tokens.push(Token::new(
+                                        &program[start..start + charlen],
+                                        line_number,
+                                        line_offset,
                                         TokenKind::Char,
                                     ));
-                                    column += charlen as i64;
+                                    line_offset += charlen as i64;
                                 } else if is_print(ch) {
                                     charlen += ch.len_utf8();
-                                    tokens.push(Token::from(
-                                        &prog[start..start + charlen],
-                                        line,
-                                        column,
+                                    tokens.push(Token::new(
+                                        &program[start..start + charlen],
+                                        line_number,
+                                        line_offset,
                                         TokenKind::Char,
                                     ));
-                                    column += charlen as i64;
+                                    line_offset += charlen as i64;
                                 }
                             } else {
-                                return Err(Errors::UnexpectedToken(line, column));
+                                return Err(Errors::UnexpectedToken(line_number, line_offset));
                             }
                         }
                     } else {
-                        return Err(Errors::UnexpectedToken(line, column));
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
+                    }
+                }
+                '"' => {
+                    // Process string literal.
+                    if let Ok((token, token_len)) = Self::try_match_string_literal(
+                        program,
+                        start,
+                        line_number,
+                        line_offset,
+                        ch,
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else {
+                        // Unlikely to happen.
+                        panic!("Cannot parse string literal");
                     }
                 }
                 _ => {
-                    return Err(Errors::UnexpectedToken(line, column));
+                    if let Ok((token, token_len)) = Self::try_match_number(
+                        // Try to parse it as a number.
+                        program,
+                        start,
+                        line_number,
+                        line_offset,
+                        ch,
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else if let Ok((token, token_len)) = Self::try_match_symbol(
+                        // Try to parse it as a symbol.
+                        program,
+                        start,
+                        line_number,
+                        line_offset,
+                        ch,
+                        &mut program_char_indices,
+                    ) {
+                        tokens.push(token);
+                        line_offset += token_len;
+                        continue;
+                    } else {
+                        return Err(Errors::UnexpectedToken(line_number, line_offset));
+                    }
                 }
             }
         }
+
+        Ok(tokens)
     }
 
-    Ok(tokens)
+    pub fn tokens(&self) -> &Vec<Token> {
+        self.tokens.as_ref()
+    }
+
+    pub fn new(program: &'a str) -> Result<Tokenizer<'a>, Errors> {
+        let tokens = Self::tokenize(program)?;
+        Ok(Self { program, tokens })
+    }
+}
+
+fn is_symbol(ch: char) -> bool {
+    if ch < '!' || ch > 'z' {
+        return false;
+    }
+
+    match ch {
+        '(' | ')' | '#' | ';' => false,
+        _ => true,
+    }
 }
 
 // See the chapter of 'Character Sets' in
@@ -348,13 +472,13 @@ fn is_print(ch: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{tokenize, Token, TokenKind};
+    use super::{Token, TokenKind, Tokenizer};
 
     #[test]
     fn test_tokenizer() {
         // Test tokenize various symbols.
         assert_eq!(
-            tokenize(
+            Tokenizer::tokenize(
                 "( (  ) ) . \n, @ #f #t #(
 
   \" some string\" #(  3.1415926   (()) 3333  (()) some_symbol
@@ -364,120 +488,106 @@ foo
 #\\newline (())"
             ),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("(", 1, 3, TokenKind::LeftParen),
-                Token::from(")", 1, 6, TokenKind::RightParen),
-                Token::from(")", 1, 8, TokenKind::RightParen),
-                Token::from(".", 1, 10, TokenKind::Dot),
-                Token::from(",", 2, 1, TokenKind::Comma),
-                Token::from("@", 2, 3, TokenKind::At),
-                Token::from("#f", 2, 5, TokenKind::Bool),
-                Token::from("#t", 2, 8, TokenKind::Bool),
-                Token::from("#(", 2, 11, TokenKind::HashLeftParen),
-                Token::from("\" some string\"", 4, 3, TokenKind::String),
-                Token::from("#(", 4, 18, TokenKind::HashLeftParen),
-                Token::from("3.1415926", 4, 22, TokenKind::Float),
-                Token::from("(", 4, 34, TokenKind::LeftParen),
-                Token::from("(", 4, 35, TokenKind::LeftParen),
-                Token::from(")", 4, 36, TokenKind::RightParen),
-                Token::from(")", 4, 37, TokenKind::RightParen),
-                Token::from("3333", 4, 39, TokenKind::Int),
-                Token::from("(", 4, 45, TokenKind::LeftParen),
-                Token::from("(", 4, 46, TokenKind::LeftParen),
-                Token::from(")", 4, 47, TokenKind::RightParen),
-                Token::from(")", 4, 48, TokenKind::RightParen),
-                Token::from("some_symbol", 4, 50, TokenKind::Symbol),
-                Token::from("some_symbol2", 5, 1, TokenKind::Symbol),
-                Token::from("(", 5, 15, TokenKind::LeftParen),
-                Token::from("(", 5, 16, TokenKind::LeftParen),
-                Token::from(")", 5, 17, TokenKind::RightParen),
-                Token::from(")", 5, 18, TokenKind::RightParen),
-                Token::from("`", 6, 1, TokenKind::BackQuote),
-                Token::from("foo", 7, 1, TokenKind::Symbol),
-                Token::from("#\\newline", 8, 1, TokenKind::Char),
-                Token::from("(", 8, 11, TokenKind::LeftParen),
-                Token::from("(", 8, 12, TokenKind::LeftParen),
-                Token::from(")", 8, 13, TokenKind::RightParen),
-                Token::from(")", 8, 14, TokenKind::RightParen),
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("(", 1, 3, TokenKind::LeftParen),
+                Token::new(")", 1, 6, TokenKind::RightParen),
+                Token::new(")", 1, 8, TokenKind::RightParen),
+                Token::new(".", 1, 10, TokenKind::Dot),
+                Token::new(",", 2, 1, TokenKind::Comma),
+                Token::new("@", 2, 3, TokenKind::At),
+                Token::new("#f", 2, 5, TokenKind::Bool),
+                Token::new("#t", 2, 8, TokenKind::Bool),
+                Token::new("#(", 2, 11, TokenKind::HashLeftParen),
+                Token::new("\" some string\"", 4, 3, TokenKind::String),
+                Token::new("#(", 4, 18, TokenKind::HashLeftParen),
+                Token::new("3.1415926", 4, 22, TokenKind::Float),
+                Token::new("(", 4, 34, TokenKind::LeftParen),
+                Token::new("(", 4, 35, TokenKind::LeftParen),
+                Token::new(")", 4, 36, TokenKind::RightParen),
+                Token::new(")", 4, 37, TokenKind::RightParen),
+                Token::new("3333", 4, 39, TokenKind::Int),
+                Token::new("(", 4, 45, TokenKind::LeftParen),
+                Token::new("(", 4, 46, TokenKind::LeftParen),
+                Token::new(")", 4, 47, TokenKind::RightParen),
+                Token::new(")", 4, 48, TokenKind::RightParen),
+                Token::new("some_symbol", 4, 50, TokenKind::Symbol),
+                Token::new("some_symbol2", 5, 1, TokenKind::Symbol),
+                Token::new("(", 5, 15, TokenKind::LeftParen),
+                Token::new("(", 5, 16, TokenKind::LeftParen),
+                Token::new(")", 5, 17, TokenKind::RightParen),
+                Token::new(")", 5, 18, TokenKind::RightParen),
+                Token::new("`", 6, 1, TokenKind::BackQuote),
+                Token::new("foo", 7, 1, TokenKind::Symbol),
+                Token::new("#\\newline", 8, 1, TokenKind::Char),
+                Token::new("(", 8, 11, TokenKind::LeftParen),
+                Token::new("(", 8, 12, TokenKind::LeftParen),
+                Token::new(")", 8, 13, TokenKind::RightParen),
+                Token::new(")", 8, 14, TokenKind::RightParen),
             ])
         );
 
         assert_eq!(
-            tokenize("lambda\nq\nlist->vector\nsoup\n+\nV17a\n<=?\na34kTMNs\nthe-word-recursion-has-many-meanings"),
-            Ok(vec![Token::from("lambda", 1, 1, TokenKind::Symbol),
-                    Token::from("q", 2, 1, TokenKind::Symbol),
-                    Token::from("list->vector", 3, 1, TokenKind::Symbol),
-                    Token::from("soup", 4, 1, TokenKind::Symbol),
-                    Token::from("+", 5, 1, TokenKind::Symbol),
-                    Token::from("V17a", 6, 1, TokenKind::Symbol),
-                    Token::from("<=?", 7, 1, TokenKind::Symbol),
-                    Token::from("a34kTMNs", 8, 1, TokenKind::Symbol),
-                    Token::from("the-word-recursion-has-many-meanings", 9, 1, TokenKind::Symbol)
-	    ])
-        );
-
-        assert_eq!(
-            tokenize("(+  1 2)"),
+            Tokenizer::tokenize("(+  1 2)"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("+", 1, 2, TokenKind::Symbol),
-                Token::from("1", 1, 5, TokenKind::Int),
-                Token::from("2", 1, 7, TokenKind::Int),
-                Token::from(")", 1, 8, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("+", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 5, TokenKind::Int),
+                Token::new("2", 1, 7, TokenKind::Int),
+                Token::new(")", 1, 8, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize("(- 1 -99999)"),
+            Tokenizer::tokenize("(- 1 -99999)"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("-", 1, 2, TokenKind::Symbol),
-                Token::from("1", 1, 4, TokenKind::Int),
-                Token::from("-99999", 1, 6, TokenKind::Int),
-                Token::from(")", 1, 12, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new("-99999", 1, 6, TokenKind::Int),
+                Token::new(")", 1, 12, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize("(- 1 -999.99)"),
+            Tokenizer::tokenize("(- 1 -999.99)"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("-", 1, 2, TokenKind::Symbol),
-                Token::from("1", 1, 4, TokenKind::Int),
-                Token::from("-999.99", 1, 6, TokenKind::Float),
-                Token::from(")", 1, 13, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new("-999.99", 1, 6, TokenKind::Float),
+                Token::new(")", 1, 13, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize("(- 1 \"string with escape character\\n\")"),
+            Tokenizer::tokenize("(- 1 \"string with escape character\\n\")"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("-", 1, 2, TokenKind::Symbol),
-                Token::from("1", 1, 4, TokenKind::Int),
-                Token::from(
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("-", 1, 2, TokenKind::Symbol),
+                Token::new("1", 1, 4, TokenKind::Int),
+                Token::new(
                     "\"string with escape character\\n\"",
                     1,
                     6,
                     TokenKind::String
                 ),
-                Token::from(")", 1, 38, TokenKind::RightParen)
+                Token::new(")", 1, 38, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize("(symbol->string 'flying-fish)"),
+            Tokenizer::tokenize("(symbol->string 'flying-fish)"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("symbol->string", 1, 2, TokenKind::Symbol),
-                Token::from("'", 1, 17, TokenKind::Quote),
-                Token::from("flying-fish", 1, 18, TokenKind::Symbol),
-                Token::from(")", 1, 29, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("symbol->string", 1, 2, TokenKind::Symbol),
+                Token::new("'", 1, 17, TokenKind::Quote),
+                Token::new("flying-fish", 1, 18, TokenKind::Symbol),
+                Token::new(")", 1, 29, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize(
+            Tokenizer::tokenize(
                 "(define counter
     ((lambda (val)
        (lambda () (setq val (+ val 1)) val))
@@ -487,73 +597,73 @@ foo
   (counter)"
             ),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("define", 1, 2, TokenKind::Symbol),
-                Token::from("counter", 1, 9, TokenKind::Symbol),
-                Token::from("(", 2, 5, TokenKind::LeftParen),
-                Token::from("(", 2, 6, TokenKind::LeftParen),
-                Token::from("lambda", 2, 7, TokenKind::Symbol),
-                Token::from("(", 2, 14, TokenKind::LeftParen),
-                Token::from("val", 2, 15, TokenKind::Symbol),
-                Token::from(")", 2, 18, TokenKind::RightParen),
-                Token::from("(", 3, 8, TokenKind::LeftParen),
-                Token::from("lambda", 3, 9, TokenKind::Symbol),
-                Token::from("(", 3, 16, TokenKind::LeftParen),
-                Token::from(")", 3, 17, TokenKind::RightParen),
-                Token::from("(", 3, 19, TokenKind::LeftParen),
-                Token::from("setq", 3, 20, TokenKind::Symbol),
-                Token::from("val", 3, 25, TokenKind::Symbol),
-                Token::from("(", 3, 29, TokenKind::LeftParen),
-                Token::from("+", 3, 30, TokenKind::Symbol),
-                Token::from("val", 3, 32, TokenKind::Symbol),
-                Token::from("1", 3, 36, TokenKind::Int),
-                Token::from(")", 3, 37, TokenKind::RightParen),
-                Token::from(")", 3, 38, TokenKind::RightParen),
-                Token::from("val", 3, 40, TokenKind::Symbol),
-                Token::from(")", 3, 43, TokenKind::RightParen),
-                Token::from(")", 3, 44, TokenKind::RightParen),
-                Token::from("0", 4, 6, TokenKind::Int),
-                Token::from(")", 4, 7, TokenKind::RightParen),
-                Token::from(")", 4, 8, TokenKind::RightParen),
-                Token::from("(", 5, 3, TokenKind::LeftParen),
-                Token::from("counter", 5, 4, TokenKind::Symbol),
-                Token::from(")", 5, 11, TokenKind::RightParen),
-                Token::from("(", 7, 3, TokenKind::LeftParen),
-                Token::from("counter", 7, 4, TokenKind::Symbol),
-                Token::from(")", 7, 11, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("define", 1, 2, TokenKind::Symbol),
+                Token::new("counter", 1, 9, TokenKind::Symbol),
+                Token::new("(", 2, 5, TokenKind::LeftParen),
+                Token::new("(", 2, 6, TokenKind::LeftParen),
+                Token::new("lambda", 2, 7, TokenKind::Symbol),
+                Token::new("(", 2, 14, TokenKind::LeftParen),
+                Token::new("val", 2, 15, TokenKind::Symbol),
+                Token::new(")", 2, 18, TokenKind::RightParen),
+                Token::new("(", 3, 8, TokenKind::LeftParen),
+                Token::new("lambda", 3, 9, TokenKind::Symbol),
+                Token::new("(", 3, 16, TokenKind::LeftParen),
+                Token::new(")", 3, 17, TokenKind::RightParen),
+                Token::new("(", 3, 19, TokenKind::LeftParen),
+                Token::new("setq", 3, 20, TokenKind::Symbol),
+                Token::new("val", 3, 25, TokenKind::Symbol),
+                Token::new("(", 3, 29, TokenKind::LeftParen),
+                Token::new("+", 3, 30, TokenKind::Symbol),
+                Token::new("val", 3, 32, TokenKind::Symbol),
+                Token::new("1", 3, 36, TokenKind::Int),
+                Token::new(")", 3, 37, TokenKind::RightParen),
+                Token::new(")", 3, 38, TokenKind::RightParen),
+                Token::new("val", 3, 40, TokenKind::Symbol),
+                Token::new(")", 3, 43, TokenKind::RightParen),
+                Token::new(")", 3, 44, TokenKind::RightParen),
+                Token::new("0", 4, 6, TokenKind::Int),
+                Token::new(")", 4, 7, TokenKind::RightParen),
+                Token::new(")", 4, 8, TokenKind::RightParen),
+                Token::new("(", 5, 3, TokenKind::LeftParen),
+                Token::new("counter", 5, 4, TokenKind::Symbol),
+                Token::new(")", 5, 11, TokenKind::RightParen),
+                Token::new("(", 7, 3, TokenKind::LeftParen),
+                Token::new("counter", 7, 4, TokenKind::Symbol),
+                Token::new(")", 7, 11, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize(
+            Tokenizer::tokenize(
                 "(#\\a #\\b #\\c  #\\space #\\c-a #\\control-a #\\meta-b #\\c-m-a  #\\C-M-a #\\0 #\\9)"
             ),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("#\\a", 1, 2, TokenKind::Char),
-                Token::from("#\\b", 1, 6, TokenKind::Char),
-                Token::from("#\\c", 1, 10, TokenKind::Char),
-                Token::from("#\\space", 1, 15, TokenKind::Char),
-                Token::from("#\\c-a", 1, 23, TokenKind::Char),
-                Token::from("#\\control-a", 1, 29, TokenKind::Char),
-                Token::from("#\\meta-b", 1, 41, TokenKind::Char),
-                Token::from("#\\c-m-a", 1, 50, TokenKind::Char),
-                Token::from("#\\C-M-a", 1, 59, TokenKind::Char),
-                Token::from("#\\0", 1, 67, TokenKind::Char),
-                Token::from("#\\9", 1, 71, TokenKind::Char),
-                Token::from(")", 1, 74, TokenKind::RightParen)
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("#\\a", 1, 2, TokenKind::Char),
+                Token::new("#\\b", 1, 6, TokenKind::Char),
+                Token::new("#\\c", 1, 10, TokenKind::Char),
+                Token::new("#\\space", 1, 15, TokenKind::Char),
+                Token::new("#\\c-a", 1, 23, TokenKind::Char),
+                Token::new("#\\control-a", 1, 29, TokenKind::Char),
+                Token::new("#\\meta-b", 1, 41, TokenKind::Char),
+                Token::new("#\\c-m-a", 1, 50, TokenKind::Char),
+                Token::new("#\\C-M-a", 1, 59, TokenKind::Char),
+                Token::new("#\\0", 1, 67, TokenKind::Char),
+                Token::new("#\\9", 1, 71, TokenKind::Char),
+                Token::new(")", 1, 74, TokenKind::RightParen)
             ])
         );
 
         assert_eq!(
-            tokenize("(define foo 1) foo"),
+            Tokenizer::tokenize("(define foo 1) foo"),
             Ok(vec![
-                Token::from("(", 1, 1, TokenKind::LeftParen),
-                Token::from("define", 1, 2, TokenKind::Symbol),
-                Token::from("foo", 1, 9, TokenKind::Symbol),
-                Token::from("1", 1, 13, TokenKind::Int),
-                Token::from(")", 1, 14, TokenKind::RightParen),
-                Token::from("foo", 1, 16, TokenKind::Symbol),
+                Token::new("(", 1, 1, TokenKind::LeftParen),
+                Token::new("define", 1, 2, TokenKind::Symbol),
+                Token::new("foo", 1, 9, TokenKind::Symbol),
+                Token::new("1", 1, 13, TokenKind::Int),
+                Token::new(")", 1, 14, TokenKind::RightParen),
+                Token::new("foo", 1, 16, TokenKind::Symbol),
             ])
         );
     }
