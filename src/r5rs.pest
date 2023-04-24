@@ -1,0 +1,105 @@
+// https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html#SEC73
+
+// <whitespace> --> <space or newline>
+WHITESPACE = _{
+  " " | "\t" | NEWLINE
+}
+
+// <comment> --> ;  <all subsequent characters up to a
+//                   line break>
+COMMENT = _{
+  ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE?
+}
+
+// <identifier> --> <initial> <subsequent>*
+//      | <peculiar identifier>
+identifier = @{
+    initial ~ subsequent*
+  | peculiar_identifier
+}
+
+// <initial> --> <letter> | <special initial>
+initial = {
+    letter
+  | special_initial
+}
+
+// <letter> --> a | b | c | ... | z
+letter = { 'a' .. 'z' }
+
+// <special initial> --> ! | $ | % | & | * | / | : | < | =
+//      | > | ? | ^ | _ | ~
+special_initial = {
+    "!" | "$" | "%" | "&" | "*" | "/" | ":" | "<" | "="
+  | ">" | "?" | "^" | "_" | "~" }
+
+// <subsequent> --> <initial> | <digit>
+//      | <special subsequent>
+subsequent = {
+    initial
+  | digit
+  | special_subsequent
+}
+
+// <digit> --> 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+digit = { ASCII_DIGIT }
+
+// <special subsequent> --> + | - | . | @
+special_subsequent = { "+" | "-" | "." | "@" }
+
+// <peculiar identifier> --> + | - | ...
+peculiar_identifier = { "+" | "-" | "..." }
+
+// <syntactic keyword> --> <expression keyword>
+//      | else | => | define 
+//      | unquote | unquote-splicing
+syntactic_keyword = {
+    expression_keyword
+  | "else" | "=>" | "define"
+  | "unquote" | "unquote-splicing"
+}
+
+// <expression keyword> --> quote | lambda | if
+//      | set! | begin | cond | and | or | case
+//      | let | let* | letrec | do | delay
+//      | quasiquote
+expression_keyword = {
+    "quote" | "lambda" | "if"
+  | "set!" | "begin" | "cond" | "and" | "or" | "case"
+  | "let" | "let*" | "letrec" | "do" | "delay"
+  | "quasiquote"
+}
+
+// `<variable> => <'any <identifier> that isn't
+//                 also a <syntactic keyword>>
+variable = {
+  !syntactic_keyword ~ identifier
+}
+
+// <boolean> --> #t | #f
+boolean = { "#t" | "#f" }
+
+// <character> --> #\ <any character>
+//      | #\ <character name>
+// FIXME: Why we should match character_name first?
+character = @{
+    "#\\" ~ character_name
+  | "#\\" ~ ANY
+}
+
+// <character name> --> space | newline
+character_name = {
+  "space" | "newline"
+}
+
+// <string> --> " <string element>* "
+string = {
+  "\"" ~ string_element* ~ "\""
+}
+
+// <string element> --> <any character other than " or \>
+//      | \" | \\
+string_element = {
+    !("\""|"\\") ~ ANY
+  | "\\\"" | "\\\\"
+}

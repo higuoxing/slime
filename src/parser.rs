@@ -1,8 +1,12 @@
-use rug::{Float, Integer};
-
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
+use pest_derive::Parser;
+use rug::{Float, Integer};
+
+#[derive(Parser)]
+#[grammar = "r5rs.pest"] // relative to src
+struct R5RSParser;
 
 // See https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
 // for syntax and semantics of MIT Scheme.
@@ -357,8 +361,11 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
 
 #[cfg(test)]
 mod tests {
+    use super::R5RSParser;
+    use super::Rule;
     use crate::object::Object;
     use crate::parser::parse_program;
+    use pest::Parser;
 
     #[test]
     fn test_parse_list() {
@@ -541,5 +548,62 @@ mod tests {
                 )
             ),)
         );
+    }
+
+    fn test_parse_atomic(rule: Rule, raw_identifier: &str, expected: &str) {
+        assert_eq!(
+            R5RSParser::parse(rule, raw_identifier)
+                .unwrap()
+                .next()
+                .unwrap()
+                .as_str(),
+            expected
+        );
+    }
+
+    fn test_parse_variable(raw_identifier: &str, expect_fail: bool) {
+        if !expect_fail {
+            assert_eq!(
+                R5RSParser::parse(Rule::variable, raw_identifier)
+                    .unwrap()
+                    .next()
+                    .unwrap()
+                    .as_str(),
+                raw_identifier
+            );
+        } else {
+            assert!(R5RSParser::parse(Rule::variable, raw_identifier).is_err());
+        }
+    }
+
+    #[test]
+    fn test_pest_parser() {
+        assert!(R5RSParser::parse(Rule::COMMENT, ";abc\n").is_ok());
+        assert!(R5RSParser::parse(Rule::COMMENT, ";abc").is_ok());
+        // Identifiers.
+        test_parse_atomic(Rule::identifier, "foo", "foo");
+        test_parse_atomic(Rule::identifier, "symbol->string\n", "symbol->string");
+        test_parse_atomic(Rule::identifier, "let*   ", "let*");
+        test_parse_atomic(Rule::identifier, "...", "...");
+        test_parse_atomic(Rule::identifier, "+\n", "+");
+        test_parse_atomic(Rule::identifier, "*\r", "*");
+
+        // Variables.
+        test_parse_variable("foo", /* expect_fail */ false);
+        test_parse_variable("let*", /* expect_fail */ true);
+
+        // Boolean.
+        test_parse_atomic(Rule::boolean, "#f", "#f");
+        test_parse_atomic(Rule::boolean, "#t  ", "#t");
+
+        // Char.
+        test_parse_atomic(Rule::character, "#\\a", "#\\a");
+        test_parse_atomic(Rule::character, "#\\ ", "#\\ ");
+        test_parse_atomic(Rule::character, "#\\space", "#\\space");
+
+        // String.
+        test_parse_atomic(Rule::string, r#""abc""#, r#""abc""#);
+        test_parse_atomic(Rule::string, r#""abc\"""#, r#""abc\"""#);
+        test_parse_atomic(Rule::string, r#""abc  \"\\""#, r#""abc  \"\\""#);
     }
 }
