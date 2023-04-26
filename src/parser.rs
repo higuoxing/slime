@@ -1,12 +1,99 @@
+use std::str::FromStr;
+
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
+use pest::iterators::Pair;
+use pest::Parser;
 use pest_derive::Parser;
 use rug::{Float, Integer};
 
 #[derive(Parser)]
 #[grammar = "r5rs.pest"] // relative to src
 struct R5RSParser;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AstNode {
+    Nil,
+    Boolean(bool),
+    Integer(Integer),
+    Real(Float),
+    String(String),
+    Char(char),
+    Variable(String),
+}
+
+pub fn parse(prog: &str) -> Vec<AstNode> {
+    let mut ast = vec![];
+    let pairs = R5RSParser::parse(Rule::program, prog).expect("foo");
+    for pair in pairs {
+        match pair.as_rule() {
+            Rule::expression => {
+                ast.push(build_ast_from_expr(pair.into_inner().next().expect("foo")));
+            }
+            unexpected => panic!(
+                "Cannot process `{:?}` rule in top level! Pair: {:?}",
+                unexpected, pair
+            ),
+        }
+    }
+
+    ast
+}
+
+fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
+    match pair.as_rule() {
+        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("foo")),
+        Rule::variable => AstNode::Variable(pair.as_str().to_string()),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_literal(pair: Pair<Rule>) -> AstNode {
+    match pair.as_rule() {
+        Rule::boolean => match pair.as_str() {
+            "#t" | "#T" => AstNode::Boolean(true),
+            "#f" | "#F" => AstNode::Boolean(false),
+            _ => panic!("Cannot convert `{}` to boolean object!", pair),
+        },
+        Rule::number => build_ast_from_number(pair.into_inner().next().expect("foo")),
+        Rule::unit => AstNode::Nil,
+        Rule::string => {
+            let inner = pair.as_str();
+            AstNode::String(inner[1..inner.len() - 1].to_string())
+        }
+        Rule::character => {
+            let inner = &pair.as_str()[2..];
+            match inner {
+                "space" => AstNode::Char(' '),
+                "newline" => AstNode::Char('\n'),
+                _ => AstNode::Char(inner.chars().nth(0).expect("foo")),
+            }
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `literal`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_number(pair: Pair<Rule>) -> AstNode {
+    match pair.as_rule() {
+        Rule::num10 => {
+            // FIXME: Support more numeric types!
+            let num_str = pair.as_str();
+            if num_str.contains(".") {
+                AstNode::Real(Float::with_val(53, Float::parse(num_str).expect("foo")))
+            } else {
+                AstNode::Integer(Integer::from_str(pair.as_str()).expect("foo"))
+            }
+        }
+        _ => todo!(),
+    }
+}
 
 // See https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
 // for syntax and semantics of MIT Scheme.
@@ -361,11 +448,17 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::R5RSParser;
     use super::Rule;
     use crate::object::Object;
+    use crate::parser::parse;
     use crate::parser::parse_program;
+    use crate::parser::AstNode;
     use pest::Parser;
+    use rug::Float;
+    use rug::Integer;
 
     #[test]
     fn test_parse_list() {
@@ -576,6 +669,20 @@ mod tests {
         }
     }
 
+    fn test_parse_expression(rule: Rule, raw_expression: &str) {
+        assert_eq!(
+            R5RSParser::parse(Rule::expression, raw_expression)
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_inner()
+                .next()
+                .unwrap()
+                .as_rule(),
+            rule
+        );
+    }
+
     #[test]
     fn test_pest_parser() {
         assert!(R5RSParser::parse(Rule::COMMENT, ";abc\n").is_ok());
@@ -605,5 +712,122 @@ mod tests {
         test_parse_atomic(Rule::string, r#""abc""#, r#""abc""#);
         test_parse_atomic(Rule::string, r#""abc\"""#, r#""abc\"""#);
         test_parse_atomic(Rule::string, r#""abc  \"\\""#, r#""abc  \"\\""#);
+
+        // Number
+        // Radix 2.
+        test_parse_atomic(Rule::number, r#"#b01"#, r#"#b01"#);
+        test_parse_atomic(Rule::number, r#"#b#i01"#, r#"#b#i01"#);
+        test_parse_atomic(Rule::number, r#"#i#b01"#, r#"#i#b01"#);
+        test_parse_atomic(Rule::number, r#"#i#b01+i"#, r#"#i#b01+i"#);
+        test_parse_atomic(Rule::number, r#"#i#b01-1i"#, r#"#i#b01-1i"#);
+        test_parse_atomic(Rule::number, r#"#b0/1"#, r#"#b0/1"#);
+        // Radix 8.
+        test_parse_atomic(Rule::number, r#"#o1"#, r#"#o1"#);
+        test_parse_atomic(Rule::number, r#"#o1+2i"#, r#"#o1+2i"#);
+        test_parse_atomic(Rule::number, r#"#o-1+2i"#, r#"#o-1+2i"#);
+        test_parse_atomic(Rule::number, r#"#o-1-2i"#, r#"#o-1-2i"#);
+        test_parse_atomic(Rule::number, r#"#o1/5"#, r#"#o1/5"#);
+        // Radix 10.
+        test_parse_atomic(Rule::number, r#"1"#, r#"1"#);
+        test_parse_atomic(Rule::number, r#"1+2i"#, r#"1+2i"#);
+        test_parse_atomic(Rule::number, r#"-1+2i"#, r#"-1+2i"#);
+        test_parse_atomic(Rule::number, r#"-1-2i"#, r#"-1-2i"#);
+        test_parse_atomic(Rule::number, r#"#d1/5"#, r#"#d1/5"#);
+        // Radix 16.
+        test_parse_atomic(Rule::number, r#"#x1"#, r#"#x1"#);
+        test_parse_atomic(Rule::number, r#"#x1+ai"#, r#"#x1+ai"#);
+        test_parse_atomic(Rule::number, r#"#x-a+2i"#, r#"#x-a+2i"#);
+        test_parse_atomic(Rule::number, r#"#x-1-2i"#, r#"#x-1-2i"#);
+        test_parse_atomic(Rule::number, r#"#xe/5"#, r#"#xe/5"#);
+
+        // Expression.
+        test_parse_expression(Rule::variable, "foo");
+        test_parse_expression(Rule::literal, "1+2i");
+        test_parse_expression(Rule::literal, "#t");
+        test_parse_expression(Rule::literal, "#\\a");
+        test_parse_expression(Rule::literal, r#""I like you.""#);
+        test_parse_expression(Rule::literal, r#"'#(1 2 3)"#);
+        test_parse_expression(Rule::literal, r#"'(1 2 3)"#);
+        test_parse_expression(Rule::literal, r#"(quote #(1 2 3))"#);
+        test_parse_expression(Rule::literal, r#"(quote ,(1 2 3))"#);
+        test_parse_expression(Rule::procedure_call, r#"(dummy 1 2 3)"#);
+        test_parse_expression(Rule::procedure_call, r#"(+ 1 2 3)"#);
+        test_parse_expression(Rule::procedure_call, r#"(* 1 2 3)"#);
+        test_parse_expression(Rule::procedure_call, r#"(bar 1 2 3)"#);
+        test_parse_expression(Rule::procedure_call, r#"(+ x 1)"#);
+        test_parse_expression(Rule::lambda_expression, r#"(lambda () 1)"#);
+        test_parse_expression(Rule::lambda_expression, r#"(lambda (x) 1)"#);
+        test_parse_expression(Rule::lambda_expression, r#"(lambda (x y z) 1)"#);
+        test_parse_expression(Rule::lambda_expression, r#"(lambda (x y . z) 1)"#);
+        test_parse_expression(Rule::lambda_expression, r#"(lambda (x y . z) (+ x y z))"#);
+        test_parse_expression(
+            Rule::lambda_expression,
+            r#"(lambda (x y . z) (define x 1) (+ x y))"#,
+        );
+        test_parse_expression(
+            Rule::lambda_expression,
+            r#"(lambda (x y . z) (define (x) (+ x 1)) (+ x y))"#,
+        );
+        test_parse_expression(
+            Rule::lambda_expression,
+            r#"(lambda (x y . z) (begin (define x 1) (define y 2)) (+ x y))"#,
+        );
+        test_parse_expression(Rule::conditional, r#"(if #t 1)"#);
+        test_parse_expression(Rule::conditional, r#"(if #t 1 2)"#);
+        test_parse_expression(Rule::assignment, r#"(set! a 1)"#);
+
+        assert_eq!(
+            R5RSParser::parse(Rule::program, r#"(+ 1 2)"#)
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_inner()
+                .next()
+                .unwrap()
+                .as_rule(),
+            Rule::procedure_call
+        );
+
+        assert_eq!(
+            R5RSParser::parse(Rule::program, r#"(define x     1)"#)
+                .unwrap()
+                .next()
+                .unwrap()
+                .into_inner()
+                .next()
+                .unwrap()
+                .as_rule(),
+            Rule::definition1
+        );
+
+        // Parse program.
+        assert_eq!(parse("#t"), vec![AstNode::Boolean(true)]);
+        assert_eq!(parse(" #f"), vec![AstNode::Boolean(false)]);
+        assert_eq!(
+            parse(" 123456789  "),
+            vec![AstNode::Integer(Integer::from(123456789))]
+        );
+        assert_eq!(
+            parse(" 1234567891011121314151617181920212223242526272829303132333435363738394041  "),
+            vec![AstNode::Integer(
+                Integer::from_str(
+                    "1234567891011121314151617181920212223242526272829303132333435363738394041"
+                )
+                .unwrap()
+            )]
+        );
+        assert_eq!(
+            parse(" 123456789.12345  "),
+            vec![AstNode::Real(Float::with_val(53, 123456789.12345))]
+        );
+        assert_eq!(parse("  (  )"), vec![AstNode::Nil]);
+        assert_eq!(
+            parse(r#" "hello, world! \\  \" " "#),
+            vec![AstNode::String(String::from(r#"hello, world! \\  \" "#))]
+        );
+        assert_eq!(parse(r#" #\a "#), vec![AstNode::Char('a')]);
+        assert_eq!(parse(r#" #\newline "#), vec![AstNode::Char('\n')]);
+        assert_eq!(parse(r#" #\space "#), vec![AstNode::Char(' ')]);
+        assert_eq!(parse(r#" a "#), vec![AstNode::Variable(String::from("a"))]);
     }
 }

@@ -1,5 +1,6 @@
-// https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html#SEC73
+// https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
 
+// 7.1.1 Lexical structure.
 // <whitespace> --> <space or newline>
 WHITESPACE = _{
   " " | "\t" | NEWLINE
@@ -53,7 +54,7 @@ peculiar_identifier = { "+" | "-" | "..." }
 // <syntactic keyword> --> <expression keyword>
 //      | else | => | define 
 //      | unquote | unquote-splicing
-syntactic_keyword = {
+syntactic_keyword = @{
     expression_keyword
   | "else" | "=>" | "define"
   | "unquote" | "unquote-splicing"
@@ -72,20 +73,18 @@ expression_keyword = {
 
 // `<variable> => <'any <identifier> that isn't
 //                 also a <syntactic keyword>>
-variable = {
+variable = @{
   !syntactic_keyword ~ identifier
 }
 
 // <boolean> --> #t | #f
-boolean = { "#t" | "#f" }
+boolean = @{ "#t" | "#T" | "#f" | "#F" }
 
 // <character> --> #\ <any character>
 //      | #\ <character name>
-// FIXME: Why we should match character_name first?
-character = @{
-    "#\\" ~ character_name
-  | "#\\" ~ ANY
-}
+character_inner = @{ character_name | ANY }
+
+character = @{ "#\\" ~ character_inner }
 
 // <character name> --> space | newline
 character_name = {
@@ -93,7 +92,7 @@ character_name = {
 }
 
 // <string> --> " <string element>* "
-string = {
+string = @{
   "\"" ~ string_element* ~ "\""
 }
 
@@ -103,3 +102,431 @@ string_element = {
     !("\""|"\\") ~ ANY
   | "\\\"" | "\\\\"
 }
+
+// <number> --> <num 2> | <num 8>
+//      | <num 10> | <num 16>
+number = {
+    num2 | num8 | num10 | num16
+}
+
+// <num 2> --> <prefix 2> <complex 2>
+num2 = @{
+  prefix2 ~ complex2
+}
+
+// <complex 2> --> <real 2> | <real 2> @ <real 2>
+//     | <real 2> + <ureal 2> i | <real 2> - <ureal 2> i
+//     | <real 2> + i | <real 2> - i
+//     | + <ureal 2> i | - <ureal 2> i | + i | - i
+complex2 = {
+    real2 ~ "@" ~ real2
+  | real2 ~ "+" ~ ureal2 ~ "i" | real2 ~ "-" ~ ureal2 ~ "i"
+  | real2 ~ "+" ~ "i" | real2 ~ "-" ~ "i"
+  | "+" ~ ureal2 ~ "i" | "-" ~ ureal2 ~ "i" | "+" ~ "i" | "-" ~ "i"
+  | real2
+}
+
+// <real 2> --> <sign>? <ureal 2>
+real2 = { sign? ~ ureal2 }
+
+// <ureal 2> --> <uinteger 2>
+//     | <uinteger 2> / <uinteger 2>
+ureal2  ={
+    uinteger2 ~ "/" ~ uinteger2
+  | uinteger2
+}
+
+// <uinteger 2> --> <digit 2>+ #*
+uinteger2 = { digit2+ ~ "#"* }
+
+// <prefix 2> --> <radix 2> <exactness>?
+//     | <exactness>? <radix 2>
+prefix2 = {
+    radix2 ~ exactness?
+  | exactness? ~ radix2
+}
+
+// <num 8> --> <prefix 8> <complex 8>
+num8 = @{ prefix8 ~ complex8 }
+
+// <complex 8> --> <real 8> | <real 8> @ <real 8>
+//     | <real 8> + <ureal 8> i | <real 8> - <ureal 8> i
+//     | <real 8> + i | <real 8> - i
+//     | + <ureal 8> i | - <ureal 8> i | + i | - i
+complex8 = {
+    real8 ~ "@" ~ real8
+  | real8 ~ "+" ~ real8 ~ "i" | real8 ~ "-" ~ real8 ~ "i"
+  | real8 ~ "+" ~ "i" | real8 ~ "-" ~ "i"
+  | "+" ~ ureal8 ~ "i" | "-" ~ ureal8 ~ "i" | "+" ~ "i" | "-" ~ "i"
+  | real8
+}
+
+// <real 8> --> <sign>? <ureal 8>
+real8 = { sign? ~ ureal8 }
+
+// <ureal 8> --> <uinteger 8>
+//     | <uinteger 8> / <uinteger 8>
+ureal8 = {
+    uinteger8 ~ "/" ~ uinteger8
+  | uinteger8
+}
+
+// <uinteger 8> --> <digit 8>+ #*
+uinteger8 = { digit8+ ~ "#"* }
+
+// <prefix 8> --> <radix 8> <exactness>?
+//     | <exactness>? <radix 8>
+prefix8 = {
+    radix8 ~ exactness?
+  | exactness? ~ radix8
+}
+
+// <num 10> --> <prefix 10>? <complex 10>
+num10 = @{ prefix10? ~ complex10 }
+
+// <complex 10> --> <real 10> | <real 10> @ <real 10>
+//     | <real 10> + <ureal 10> i | <real 10> - <ureal 10> i
+//     | <real 10> + i | <real 10> - i
+//     | + <ureal 10> i | - <ureal 10> i | + i | - i
+complex10 = {
+    real10 ~ "@" ~ real10
+  | real10 ~ "+" ~ ureal10 ~ "i" | real10 ~ "-" ~ ureal10 ~ "i"
+  | real10 ~ "+" ~ "i" | real10 ~ "-" ~ "i"
+  | "+" ~ ureal10 ~ "i" | "-" ~ ureal10 ~ "i" | "+" ~ "i" | "-" ~ "i"
+  | real10
+}
+
+// <real 10> --> <sign>? <ureal 10>
+real10 = { sign? ~ ureal10 }
+
+// <ureal 10> --> <uinteger 10>
+//     | <uinteger 10> / <uinteger 10>
+//     | <decimal 10>
+ureal10 = {
+    uinteger10 ~ "/" ~ uinteger10
+  | decimal10
+  | uinteger10
+}
+
+// <decimal 10> --> <uinteger 10> <suffix>?
+//     | . <digit 10>+ #* <suffix>?
+//     | <digit 10>+ . <digit 10>* #* <suffix>?
+//     | <digit 10>+ #+ . #* <suffix>?
+decimal10 = {
+    "." ~ digit10+ ~ "#"* ~ suffix?
+  | digit10+ ~ "." ~ digit10* ~ "#"* ~ suffix?
+  | digit10+ ~ "#"* ~ "." ~ "#"* ~ suffix?
+  | uinteger10 ~ suffix?
+}
+
+// <uinteger 10> --> <digit 10>+ #*
+uinteger10 = { digit10+ ~ "#"* }
+
+// <prefix 10> --> <radix 10>? <exactness>?
+//     | <exactness>? <radix 10>?
+// FIXME: Pest doesn't allow syntax like
+//        `radix10? ~ exactness?`
+//        so I expand it manually.
+prefix10 = {
+    radix10 ~ exactness
+  | radix10 ~ exactness?
+  | radix10? ~ exactness
+  | exactness ~ radix10
+  | exactness ~ radix10?
+  | exactness? ~ radix10
+}
+
+// <num 16> --> <prefix 16> <complex 16>
+num16 = @{ prefix16 ~ complex16 }
+
+// <complex 16> --> <real 16> | <real 16> @ <real 16>
+//     | <real 16> + <ureal 16> i | <real 16> - <ureal 16> i
+//     | <real 16> + i | <real 16> - i
+//     | + <ureal 16> i | - <ureal 16> i | + i | - i
+complex16 = {
+    real16 ~ "@" ~ real16
+  | real16 ~ "+" ~ ureal16 ~ "i" | real16 ~ "-" ~ ureal16 ~ "i"
+  | real16 ~ "+" ~ "i" | real16 ~ "-" ~ "i"
+  | "+" ~ ureal16 ~ "i" | "-" ~ ureal16 ~ "i" | "+" ~ "i" | "-" ~ "i"
+  | real16
+}
+
+// <real 16> --> <sign>? <ureal 16>
+real16 = { sign? ~ ureal16 }
+
+// <ureal 16> --> <uinteger 16>
+//     | <uinteger 16> / <uinteger 16>
+ureal16 = {
+    uinteger16 ~ "/" ~ uinteger16
+  | uinteger16
+}
+
+// <uinteger 16> --> <digit 16>+ #*
+uinteger16 = { digit16+ ~ "#"* }
+
+// <prefix 16> --> <radix 16> <exactness>?
+//     | <exactness>? <radix 16>
+prefix16 = {
+    radix16 ~ exactness?
+  | exactness? ~ radix16
+}
+
+// <suffix> --> <empty>
+//     | <exponent marker> <sign>? <digit 10>+
+suffix = { exponent_marker ~ sign? ~ digit10+ }
+
+// <exponent marker> --> e | s | f | d | l
+exponent_marker = { "e" | "s" | "f" | "d" | "l" }
+
+// <sign> --> <empty>  | + |  -
+sign = { "+" | "-" }
+
+// <exactness> --> <empty> | #i | #e
+exactness = { "#i" | "#e" }
+
+// <radix 2> --> #b
+radix2 = { "#b" }
+
+// <radix 8> --> #o
+radix8 = { "#o" }
+
+// <radix 10> --> <empty> | #d
+radix10 = { "#d" }
+
+// <radix 16> --> #x
+radix16 = { "#x" }
+
+// <digit 2> --> 0 | 1
+digit2 = { ASCII_BIN_DIGIT }
+
+// <digit 8> --> 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+digit8 = { ASCII_OCT_DIGIT }
+
+// <digit 10> --> <digit>
+digit10 = { ASCII_DIGIT }
+
+// <digit 16> --> <digit 10> | a | b | c | d | e | f
+digit16 = { ASCII_HEX_DIGIT }
+
+// 7.1.2 External representations.
+// <datum> --> <simple datum> | <compound datum>
+datum = { simple_datum | compound_datum }
+
+// <simple datum> --> <boolean> | <number>
+//      | <character> | <string> | <symbol>
+simple_datum = {
+    boolean
+  | number
+  | character
+  | string
+  | symbol
+}
+
+// <symbol> --> <identifier>
+symbol = { identifier }
+
+// <compound datum> --> <list> | <vector>
+compound_datum = { list | vector }
+
+// <list> --> (<datum>*) | (<datum>+ . <datum>)
+//        | <abbreviation>
+list = {
+    "(" ~ datum* ~ ")"
+  | "(" ~ datum+ ~ "." ~ datum ~ ")"
+  | abbreviation
+}
+
+// <abbreviation> --> <abbrev prefix> <datum>
+abbreviation = { abbrev_prefix ~ datum }
+
+// <abbrev prefix> --> ' | ` | , | ,@
+abbrev_prefix = { "'" | "`" | "," | ",@" }
+
+// <vector> --> #(<datum>*)
+vector = { "#(" ~ datum* ~ ")" }
+
+// 7.1.3 Expressions.
+// <expression> --> <variable>
+//      | <literal>
+//      | <procedure call>
+//      | <lambda expression>
+//      | <conditional>
+//      | <assignment>
+//      | <derived expression>
+//      | <macro use>
+//      | <macro block>
+expression = {
+    variable
+  | literal
+  | procedure_call
+  | lambda_expression
+  | conditional
+  | assignment
+}
+
+// <literal> --> <quotation> | <self-evaluating>
+literal = { quotation | self_evaluating }
+
+// <self-evaluating> --> <boolean> | <number>
+//      | <character> | <string>
+// FIXME: `()` is added by myself. Is it correct?
+unit = { "(" ~ ")" }
+self_evaluating = _{
+    boolean
+  | number
+  | character
+  | string
+  | unit
+}
+
+// <quotation> --> '<datum> | (quote <datum>)
+quotation = { "'" ~ datum | "(" ~ "quote" ~ datum ~ ")" }
+
+// <procedure call> --> (<operator> <operand>*)
+procedure_call = { "(" ~ operator ~ operand* ~ ")" }
+
+// <operator> --> <expression>
+operator = { expression }
+
+// <operand> --> <expression>
+operand = { expression }
+
+// <lambda expression> --> (lambda <formals> <body>)
+lambda_expression = { "(" ~ "lambda" ~ formals ~ body ~ ")" }
+
+// <formals> --> (<variable>*) | <variable>
+//      | (<variable>+ . <variable>)
+formals = {
+    "(" ~ variable* ~ ")"
+  | variable
+  | "(" ~ variable+ ~ "." ~ variable ~ ")"
+}
+
+// <body> --> <definition>* <sequence>
+body = { definition* ~ sequence }
+
+// <sequence> --> <command>* <expression>
+// FIXME: If we write it as `command* ~ expression`, it will cause parse error and
+//        I don't know why...
+sequence = { expression+ }
+
+// <command> --> <expression>
+command = _{ expression }
+
+// <conditional> --> (if <test> <consequent> <alternate>)
+conditional = { "(" ~ "if" ~ test ~ consequent ~ alternate? ~ ")" }
+
+// <test> --> <expression>
+test = { expression }
+
+// <consequent> --> <expression>
+consequent = { expression }
+
+// <alternate> --> <expression> | <empty>
+alternate = { expression }
+
+// <assignment> --> (set! <variable> <expression>)
+assignment = { "(" ~ "set!" ~ variable ~ expression ~ ")" }
+
+// <derived expression> -->
+//        (cond <cond clause>+)
+//      | (cond <cond clause>* (else <sequence>))
+//      | (case <expression>
+//          <case clause>+)
+//      | (case <expression>
+//          <case clause>*
+//          (else <sequence>))
+//      | (and <test>*)
+//      | (or <test>*)
+//      | (let (<binding spec>*) <body>)
+//      | (let <variable> (<binding spec>*) <body>)
+//      | (let* (<binding spec>*) <body>)
+//      | (letrec (<binding spec>*) <body>)
+//      | (begin <sequence>)
+//      | (do (<iteration spec>*)
+//            (<test> <do result>)
+//          <command>*)
+//      | (delay <expression>)
+//      | <quasiquotation>
+//
+// <cond clause> --> (<test> <sequence>)
+//       | (<test>)
+//       | (<test> => <recipient>)
+// <recipient> --> <expression>
+// <case clause> --> ((<datum>*) <sequence>)
+// <binding spec> --> (<variable> <expression>)
+// <iteration spec> --> (<variable> <init> <step>)
+//     | (<variable> <init>)
+// <init> --> <expression>
+// <step> --> <expression>
+// <do result> --> <sequence> | <empty>
+
+// <macro use> --> (<keyword> <datum>*)
+// <keyword> --> <identifier>
+
+// <macro block> -->
+//      (let-syntax (<syntax spec>*) <body>)
+//      | (letrec-syntax (<syntax spec>*) <body>)
+// <syntax spec> --> (<keyword> <transformer spec>)
+
+// 7.1.5 Transformers.
+// <transformer spec> -->
+//     (syntax-rules (<identifier>*) <syntax rule>*)
+// <syntax rule> --> (<pattern> <template>)
+// <pattern> --> <pattern identifier>
+//      | (<pattern>*)
+//      | (<pattern>+ . <pattern>)
+//      | (<pattern>* <pattern> <ellipsis>)
+//      | #(<pattern>*)
+//      | #(<pattern>* <pattern> <ellipsis>)
+//      | <pattern datum>
+// <pattern datum> --> <string>
+//      | <character>
+//      | <boolean>
+//      | <number>
+// <template> --> <pattern identifier>
+//      | (<template element>*)
+//      | (<template element>+ . <template>)
+//      | #(<template element>*)
+//      | <template datum>
+// <template element> --> <template>
+//      | <template> <ellipsis>
+// <template datum> --> <pattern datum>
+// <pattern identifier> --> <any identifier except `...'>
+// <ellipsis> --> <the identifier `...'>
+
+// 7.1.6 Programs and definitions.
+// <program> --> <command or definition>*
+program = _{ WHITESPACE* ~ command_or_definition* }
+
+// <command or definition> --> <command>
+//     | <definition>
+//     | <syntax definition>
+//     | (begin <command or definition>+)
+command_or_definition = _{
+    command
+  | definition
+  | "(" ~ "begin" ~ command_or_definition+ ~ ")"
+}
+
+// <definition> --> (define <variable> <expression>)
+//       | (define (<variable> <def formals>) <body>)
+//       | (begin <definition>*)
+definition1 = { "(" ~ "define" ~ variable ~ expression ~ ")" }
+definition2 = { "(" ~ "define" ~ "(" ~ variable ~ def_formals ~ ")" ~ body ~ ")" }
+definition3 = { "(" ~ "begin" ~ definition* ~ ")" }
+definition = {
+    definition1
+  | definition2
+  | definition3
+}
+
+// <def formals> --> <variable>*
+//       | <variable>* . <variable>
+def_formals = {
+    variable* ~ "." ~ variable
+  | variable*
+}
+
+// <syntax definition> -->
+//      (define-syntax <keyword> <transformer spec>)
