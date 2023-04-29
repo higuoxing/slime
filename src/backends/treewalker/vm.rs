@@ -1043,7 +1043,8 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
-    use crate::{object::Object, parser::parse_program, vm::Machine};
+    use super::Machine;
+    use crate::{object::Object, parser::parse_program};
 
     #[test]
     fn test_eval() {
