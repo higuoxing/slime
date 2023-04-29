@@ -17,10 +17,8 @@ pub enum LambdaFormal {
     AtLeastN(Vec<String>, /* The last symbol */ String),
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Object {
-    // Default is needed for taking ownership.
-    #[default]
     Unspecified,
     Nil,
     Real(f64),
@@ -194,10 +192,14 @@ impl Object {
         }
     }
 
-    pub fn reverse_list_with_tail(mut list: Object, mut tail: Object) -> Object {
-        while let Object::Cons { car, cdr } = list {
-            tail = Object::make_cons(car.take(), tail);
-            list = cdr.take();
+    pub fn reverse_list_with_tail(list: Object, mut tail: Object) -> Object {
+        let mut list = Rc::new(RefCell::new(list));
+        while let Object::Cons { ref car, ref cdr } = &*list.clone().borrow() {
+            tail = Object::Cons {
+                car: car.clone(),
+                cdr: Rc::new(RefCell::new(tail)),
+            };
+            list = cdr.clone();
         }
         tail
     }
