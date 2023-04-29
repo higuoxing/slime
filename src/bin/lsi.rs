@@ -2,12 +2,11 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
+use clap::Parser;
+use lambda::backends::treewalker::vm;
 use lambda::error::Errors;
 use lambda::object;
 use lambda::parser;
-use lambda::vm;
-
-use clap::Parser;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 

@@ -1,12 +1,9 @@
-use std::str::FromStr;
-
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
-use rug::{Float, Integer};
 
 #[derive(Parser)]
 #[grammar = "r5rs.pest"] // relative to src
@@ -16,8 +13,8 @@ struct R5RSParser;
 pub enum AstNode {
     Nil,
     Boolean(bool),
-    Integer(Integer),
-    Real(Float),
+    Integer(i64),
+    Real(f64),
     String(String),
     Char(char),
     Variable(String),
@@ -25,11 +22,11 @@ pub enum AstNode {
 
 pub fn parse(prog: &str) -> Vec<AstNode> {
     let mut ast = vec![];
-    let pairs = R5RSParser::parse(Rule::program, prog).expect("foo");
+    let pairs = R5RSParser::parse(Rule::program, prog).expect("todo");
     for pair in pairs {
         match pair.as_rule() {
             Rule::expression => {
-                ast.push(build_ast_from_expr(pair.into_inner().next().expect("foo")));
+                ast.push(build_ast_from_expr(pair.into_inner().next().expect("todo")));
             }
             unexpected => panic!(
                 "Cannot process `{:?}` rule in top level! Pair: {:?}",
@@ -43,7 +40,7 @@ pub fn parse(prog: &str) -> Vec<AstNode> {
 
 fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
     match pair.as_rule() {
-        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("foo")),
+        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("todo")),
         Rule::variable => AstNode::Variable(pair.as_str().to_string()),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
@@ -59,7 +56,7 @@ fn build_ast_from_literal(pair: Pair<Rule>) -> AstNode {
             "#f" | "#F" => AstNode::Boolean(false),
             _ => panic!("Cannot convert `{}` to boolean object!", pair),
         },
-        Rule::number => build_ast_from_number(pair.into_inner().next().expect("foo")),
+        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
         Rule::unit => AstNode::Nil,
         Rule::string => {
             let inner = pair.as_str();
@@ -70,7 +67,7 @@ fn build_ast_from_literal(pair: Pair<Rule>) -> AstNode {
             match inner {
                 "space" => AstNode::Char(' '),
                 "newline" => AstNode::Char('\n'),
-                _ => AstNode::Char(inner.chars().nth(0).expect("foo")),
+                _ => AstNode::Char(inner.chars().nth(0).expect("todo")),
             }
         }
         unexpected => panic!(
@@ -86,9 +83,9 @@ fn build_ast_from_number(pair: Pair<Rule>) -> AstNode {
             // FIXME: Support more numeric types!
             let num_str = pair.as_str();
             if num_str.contains(".") {
-                AstNode::Real(Float::with_val(53, Float::parse(num_str).expect("foo")))
+                AstNode::Real(num_str.parse::<f64>().expect("todo"))
             } else {
-                AstNode::Integer(Integer::from_str(pair.as_str()).expect("foo"))
+                AstNode::Integer(num_str.parse::<i64>().expect("todo"))
             }
         }
         _ => todo!(),
@@ -123,30 +120,26 @@ fn parse_bool<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<O
 fn parse_number<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
     let curr_token = tokens[*token_cursor];
     match curr_token.kind() {
-        TokenKind::Int => {
-            if let Ok(n) = Integer::from_str_radix(curr_token.literal(), 10) {
-                // Advance the cursor.
+        TokenKind::Int => match curr_token.literal().parse::<i64>() {
+            Ok(n) => {
                 *token_cursor += 1;
                 Ok(Object::Int(n))
-            } else {
-                Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ))
             }
-        }
-        TokenKind::Float => {
-            if let Ok(f) = Float::parse(curr_token.literal()) {
-                // Advance the cursor.
+            Err(_) => Err(Errors::UnexpectedToken(
+                curr_token.line(),
+                curr_token.column(),
+            )),
+        },
+        TokenKind::Float => match curr_token.literal().parse::<f64>() {
+            Ok(f) => {
                 *token_cursor += 1;
-                Ok(Object::Real(Float::with_val(53, f)))
-            } else {
-                Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ))
+                Ok(Object::Real(f))
             }
-        }
+            Err(_) => Err(Errors::UnexpectedToken(
+                curr_token.line(),
+                curr_token.column(),
+            )),
+        },
         _ => Err(Errors::UnexpectedToken(
             curr_token.line(),
             curr_token.column(),
@@ -448,8 +441,6 @@ pub fn parse_program(program: &str) -> Result<Object, Errors> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use super::R5RSParser;
     use super::Rule;
     use crate::object::Object;
@@ -457,8 +448,6 @@ mod tests {
     use crate::parser::parse_program;
     use crate::parser::AstNode;
     use pest::Parser;
-    use rug::Float;
-    use rug::Integer;
 
     #[test]
     fn test_parse_list() {
@@ -803,22 +792,11 @@ mod tests {
         // Parse program.
         assert_eq!(parse("#t"), vec![AstNode::Boolean(true)]);
         assert_eq!(parse(" #f"), vec![AstNode::Boolean(false)]);
-        assert_eq!(
-            parse(" 123456789  "),
-            vec![AstNode::Integer(Integer::from(123456789))]
-        );
-        assert_eq!(
-            parse(" 1234567891011121314151617181920212223242526272829303132333435363738394041  "),
-            vec![AstNode::Integer(
-                Integer::from_str(
-                    "1234567891011121314151617181920212223242526272829303132333435363738394041"
-                )
-                .unwrap()
-            )]
-        );
+        assert_eq!(parse(" 123456789  "), vec![AstNode::Integer(123456789)]);
+
         assert_eq!(
             parse(" 123456789.12345  "),
-            vec![AstNode::Real(Float::with_val(53, 123456789.12345))]
+            vec![AstNode::Real(123456789.12345)]
         );
         assert_eq!(parse("  (  )"), vec![AstNode::Nil]);
         assert_eq!(

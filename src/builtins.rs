@@ -1,12 +1,8 @@
+use crate::error::Errors;
+use crate::object::Object;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-
-use crate::error::Errors;
-use crate::object::Object;
-
-use rug::Float;
-use rug::Integer;
 
 pub type BuiltinFuncSig = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
@@ -107,9 +103,9 @@ fn builtin_numeric_plus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         for arg in args.iter() {
             result += arg.clone().borrow().get_as_float();
         }
-        Ok(Object::Real(Float::with_val(53, result)))
+        Ok(Object::Real(result))
     } else {
-        let mut result = Integer::ZERO;
+        let mut result = 0;
         for arg in args.iter() {
             result += arg.clone().borrow().get_as_int();
         }
@@ -153,9 +149,9 @@ fn builtin_numeric_minus(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
             }
         }
 
-        Ok(Object::Real(Float::with_val(53, result)))
+        Ok(Object::Real(result))
     } else {
-        let mut result = Integer::ZERO;
+        let mut result = 0;
         for (arg_index, arg) in args.iter().enumerate() {
             if arg_index == 0 {
                 if args.len() == 1 {
@@ -197,9 +193,9 @@ fn builtin_numeric_times(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         for arg in args.iter() {
             result *= arg.clone().borrow().get_as_float();
         }
-        Ok(Object::Real(Float::with_val(53, result)))
+        Ok(Object::Real(result))
     } else {
-        let mut result = Integer::from(1);
+        let mut result = 1;
         for arg in args.iter() {
             result *= arg.clone().borrow().get_as_int();
         }

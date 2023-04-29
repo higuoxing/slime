@@ -7,9 +7,6 @@ use std::default::Default;
 use std::fmt;
 use std::rc::Rc;
 
-use rug::Float;
-use rug::Integer;
-
 #[derive(Debug, PartialEq)]
 pub enum LambdaFormal {
     // Any number of arguments.
@@ -26,8 +23,8 @@ pub enum Object {
     #[default]
     Unspecified,
     Nil,
-    Real(Float),
-    Int(Integer),
+    Real(f64),
+    Int(i64),
     Bool(bool),
     // An MIT Scheme character consists of a code part and a bucky bits part.
     // See: https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
@@ -115,11 +112,11 @@ impl Object {
     }
 
     pub fn make_int(n: i64) -> Object {
-        Object::Int(Integer::from(n))
+        Object::Int(n)
     }
 
     pub fn make_real(n: f64) -> Object {
-        Object::Real(Float::with_val(53, n))
+        Object::Real(n)
     }
 
     pub fn is_cons(&self) -> bool {
@@ -159,20 +156,17 @@ impl Object {
 
     pub fn get_as_float(&self) -> f64 {
         match self {
-            Object::Int(v) => v.to_f64(),
-            Object::Real(v) => v.to_f64(),
+            Object::Int(v) => *v as f64,
+            Object::Real(v) => *v,
             _ => 0.0,
         }
     }
 
-    pub fn get_as_int(&self) -> Integer {
+    pub fn get_as_int(&self) -> i64 {
         match self {
-            Object::Int(v) => v.clone(),
-            Object::Real(v) => match v.to_integer() {
-                Some(v) => v,
-                None => Integer::ZERO,
-            },
-            _ => Integer::ZERO,
+            Object::Int(v) => *v,
+            Object::Real(v) => *v as i64,
+            _ => 0,
         }
     }
 
