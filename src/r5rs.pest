@@ -497,7 +497,7 @@ assignment = { "(" ~ "set!" ~ variable ~ expression ~ ")" }
 
 // 7.1.6 Programs and definitions.
 // <program> --> <command or definition>*
-program = _{ WHITESPACE* ~ command_or_definition* }
+program = _{ SOI ~ command_or_definition* ~ EOI }
 
 // <command or definition> --> <command>
 //     | <definition>

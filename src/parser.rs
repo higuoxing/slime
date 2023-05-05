@@ -9,39 +9,44 @@ use pest_derive::Parser;
 #[grammar = "r5rs.pest"] // relative to src
 struct R5RSParser;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum AstNode {
-    Nil,
-    Boolean(bool),
-    Integer(i64),
-    Real(f64),
-    String(String),
-    Char(char),
-    Variable(String),
-}
-
-pub fn parse(prog: &str) -> Vec<AstNode> {
-    let mut ast = vec![];
+pub fn parse_program(prog: &str) -> Result<Object, Errors> {
+    let mut result = Object::Nil;
     let pairs = R5RSParser::parse(Rule::program, prog).expect("todo");
+
     for pair in pairs {
         match pair.as_rule() {
             Rule::expression => {
-                ast.push(build_ast_from_expr(pair.into_inner().next().expect("todo")));
+                result = Object::make_cons(
+                    build_ast_from_expr(pair.into_inner().next().expect("todo")),
+                    result,
+                );
             }
-            unexpected => panic!(
-                "Cannot process `{:?}` rule in top level! Pair: {:?}",
-                unexpected, pair
-            ),
+            Rule::EOI => {
+                // TODO?
+            }
+            unexpected => {
+                panic!(
+                    "Cannot process `{:?}` rule in top level! Pair: {:?}",
+                    unexpected, pair
+                )
+            }
         }
     }
 
-    ast
+    // Insert a BEGIN symbol if we have multiple expressions.
+    // See: 4.2.3  Sequencing
+    // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
+    if !result.is_nil() {
+        result = Object::make_begin(Object::reverse_list(result));
+    }
+
+    Ok(result)
 }
 
-fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
+fn build_ast_from_expr(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("todo")),
-        Rule::variable => AstNode::Variable(pair.as_str().to_string()),
+        Rule::variable => Object::Symbol(pair.as_str().to_string()),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
             unexpected, pair
@@ -49,25 +54,25 @@ fn build_ast_from_expr(pair: Pair<Rule>) -> AstNode {
     }
 }
 
-fn build_ast_from_literal(pair: Pair<Rule>) -> AstNode {
+fn build_ast_from_literal(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::boolean => match pair.as_str() {
-            "#t" | "#T" => AstNode::Boolean(true),
-            "#f" | "#F" => AstNode::Boolean(false),
+            "#t" | "#T" => Object::Bool(true),
+            "#f" | "#F" => Object::Bool(false),
             _ => panic!("Cannot convert `{}` to boolean object!", pair),
         },
         Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
-        Rule::unit => AstNode::Nil,
+        Rule::unit => Object::Nil,
         Rule::string => {
             let inner = pair.as_str();
-            AstNode::String(inner[1..inner.len() - 1].to_string())
+            Object::String(inner[1..inner.len() - 1].to_string())
         }
         Rule::character => {
             let inner = &pair.as_str()[2..];
             match inner {
-                "space" => AstNode::Char(' '),
-                "newline" => AstNode::Char('\n'),
-                _ => AstNode::Char(inner.chars().nth(0).expect("todo")),
+                "space" => Object::make_char(' ' as u32, 0),
+                "newline" => Object::make_char('\n' as u32, 0),
+                _ => Object::make_char(inner.chars().nth(0).expect("todo") as u32, 0),
             }
         }
         unexpected => panic!(
@@ -77,15 +82,15 @@ fn build_ast_from_literal(pair: Pair<Rule>) -> AstNode {
     }
 }
 
-fn build_ast_from_number(pair: Pair<Rule>) -> AstNode {
+fn build_ast_from_number(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::num10 => {
             // FIXME: Support more numeric types!
             let num_str = pair.as_str();
             if num_str.contains(".") {
-                AstNode::Real(num_str.parse::<f64>().expect("todo"))
+                Object::Real(num_str.parse::<f64>().expect("todo"))
             } else {
-                AstNode::Integer(num_str.parse::<i64>().expect("todo"))
+                Object::Int(num_str.parse::<i64>().expect("todo"))
             }
         }
         _ => todo!(),
@@ -409,44 +414,42 @@ fn parse_object_recursive<'a>(
     }
 }
 
-pub fn parse_program(program: &str) -> Result<Object, Errors> {
-    let tokenizer = Tokenizer::new(program)?;
-    let tokens = tokenizer.tokens();
-    let token_len = tokens.len();
-    let mut token_cursor = 0;
-    let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
-
-    if token_cursor < token_len {
-        result = Object::make_cons(result, Object::Nil);
-
-        while token_cursor < token_len {
-            match parse_object_recursive(tokens, &mut token_cursor) {
-                Ok(object) => {
-                    result = Object::make_cons(object, result);
-                }
-                Err(e) => {
-                    return Err(e);
-                }
-            }
-        }
-
-        // Insert a BEGIN symbol if we have multiple expressions.
-        // See: 4.2.3  Sequencing
-        // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-        result = Object::make_begin(Object::reverse_list(result));
-    }
-
-    Ok(result)
-}
+// pub fn parse_program(program: &str) -> Result<Object, Errors> {
+//     let tokenizer = Tokenizer::new(program)?;
+//     let tokens = tokenizer.tokens();
+//     let token_len = tokens.len();
+//     let mut token_cursor = 0;
+//     let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
+//
+//     if token_cursor < token_len {
+//         result = Object::make_cons(result, Object::Nil);
+//
+//         while token_cursor < token_len {
+//             match parse_object_recursive(tokens, &mut token_cursor) {
+//                 Ok(object) => {
+//                     result = Object::make_cons(object, result);
+//                 }
+//                 Err(e) => {
+//                     return Err(e);
+//                 }
+//             }
+//         }
+//
+//         // Insert a BEGIN symbol if we have multiple expressions.
+//         // See: 4.2.3  Sequencing
+//         // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
+//         result = Object::make_begin(Object::reverse_list(result));
+//     }
+//
+//     Ok(result)
+// }
 
 #[cfg(test)]
 mod tests {
     use super::R5RSParser;
     use super::Rule;
     use crate::object::Object;
-    use crate::parser::parse;
     use crate::parser::parse_program;
-    use crate::parser::AstNode;
     use pest::Parser;
 
     #[test]
@@ -790,22 +793,79 @@ mod tests {
         );
 
         // Parse program.
-        assert_eq!(parse("#t"), vec![AstNode::Boolean(true)]);
-        assert_eq!(parse(" #f"), vec![AstNode::Boolean(false)]);
-        assert_eq!(parse(" 123456789  "), vec![AstNode::Integer(123456789)]);
+        assert_eq!(
+            parse_program("#t").unwrap(),
+            Object::make_begin(Object::make_cons(Object::Bool(true), Object::Nil))
+        );
+        assert_eq!(
+            parse_program(" #f").unwrap(),
+            Object::make_begin(Object::make_cons(Object::Bool(false), Object::Nil))
+        );
+        assert_eq!(
+            parse_program(" 123456789  ").unwrap(),
+            Object::make_begin(Object::make_cons(Object::Int(123456789), Object::Nil))
+        );
 
         assert_eq!(
-            parse(" 123456789.12345  "),
-            vec![AstNode::Real(123456789.12345)]
+            parse_program(" 123456789.12345  ").unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::Real(123456789.12345),
+                Object::Nil
+            ))
         );
-        assert_eq!(parse("  (  )"), vec![AstNode::Nil]);
         assert_eq!(
-            parse(r#" "hello, world! \\  \" " "#),
-            vec![AstNode::String(String::from(r#"hello, world! \\  \" "#))]
+            parse_program("  (  )").unwrap(),
+            Object::make_begin(Object::make_cons(Object::Nil, Object::Nil))
         );
-        assert_eq!(parse(r#" #\a "#), vec![AstNode::Char('a')]);
-        assert_eq!(parse(r#" #\newline "#), vec![AstNode::Char('\n')]);
-        assert_eq!(parse(r#" #\space "#), vec![AstNode::Char(' ')]);
-        assert_eq!(parse(r#" a "#), vec![AstNode::Variable(String::from("a"))]);
+        assert_eq!(
+            parse_program(r#" "hello, world! \\  \" " "#).unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::String(String::from(r#"hello, world! \\  \" "#)),
+                Object::Nil
+            ))
+        );
+        assert_eq!(
+            parse_program(r#" #\a "#).unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::make_char('a' as u32, 0),
+                Object::Nil
+            ))
+        );
+        assert_eq!(
+            parse_program(r#" #\newline "#).unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::make_char('\n' as u32, 0),
+                Object::Nil
+            ))
+        );
+        assert_eq!(
+            parse_program(r#" #\space "#).unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::make_char(' ' as u32, 0),
+                Object::Nil
+            ))
+        );
+        assert_eq!(
+            parse_program(r#" a "#).unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::Symbol(String::from("a")),
+                Object::Nil
+            ))
+        );
+        assert_eq!(
+            parse_program(
+                r#"
+;; comments
+  ;; comments2
+
+bbb
+"#
+            )
+            .unwrap(),
+            Object::make_begin(Object::make_cons(
+                Object::Symbol(String::from("bbb")),
+                Object::Nil
+            ))
+        );
     }
 }
