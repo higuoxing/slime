@@ -1043,8 +1043,7 @@ impl Machine {
 
 #[cfg(test)]
 mod tests {
-    use super::Machine;
-    use crate::{object::Object, parser::parse_program};
+    use crate::{backends::treewalker::vm::Machine, object::Object, parser::parse_program};
 
     #[test]
     fn test_eval() {
@@ -1068,14 +1067,14 @@ mod tests {
 
         assert_eq!(
             // "(begin)"
-            m.eval(parse_program("(BEGIN)").unwrap()).unwrap(),
+            m.eval(parse_program("(begin)").unwrap()).unwrap(),
             Object::Nil
         );
         assert_eq!(m.stack.len(), 0);
 
         assert_eq!(
             // "(begin (begin 1 2 3))"
-            m.eval(parse_program("(begin (BEGIN 1 2 3))").unwrap())
+            m.eval(parse_program("(begin (begin 1 2 3))").unwrap())
                 .unwrap(),
             Object::make_int(3)
         );

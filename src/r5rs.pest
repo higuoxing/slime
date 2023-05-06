@@ -330,9 +330,11 @@ compound_datum = { list | vector }
 
 // <list> --> (<datum>*) | (<datum>+ . <datum>)
 //        | <abbreviation>
+list1 = { "(" ~ datum* ~ ")" }
+list2 = { "(" ~ datum+ ~ "." ~ datum ~ ")" }
 list = {
-    "(" ~ datum* ~ ")"
-  | "(" ~ datum+ ~ "." ~ datum ~ ")"
+    list1
+  | list2
   | abbreviation
 }
 
@@ -371,7 +373,7 @@ literal = { quotation | self_evaluating }
 //      | <character> | <string>
 // FIXME: `()` is added by myself. Is it correct?
 unit = { "(" ~ ")" }
-self_evaluating = _{
+self_evaluating = {
     boolean
   | number
   | character

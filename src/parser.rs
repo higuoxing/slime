@@ -1,3 +1,5 @@
+use std::collections::LinkedList;
+
 use crate::error::Errors;
 use crate::object::Object;
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
@@ -10,17 +12,14 @@ use pest_derive::Parser;
 struct R5RSParser;
 
 pub fn parse_program(prog: &str) -> Result<Object, Errors> {
-    let mut result = Object::Nil;
+    let mut exprs = vec![];
     let pairs = R5RSParser::parse(Rule::program, prog).expect("todo");
 
     for pair in pairs {
         match pair.as_rule() {
-            Rule::expression => {
-                result = Object::make_cons(
-                    build_ast_from_expr(pair.into_inner().next().expect("todo")),
-                    result,
-                );
-            }
+            Rule::expression => exprs.push(build_ast_from_expression(
+                pair.into_inner().next().expect("todo"),
+            )),
             Rule::EOI => {
                 // TODO?
             }
@@ -36,47 +35,123 @@ pub fn parse_program(prog: &str) -> Result<Object, Errors> {
     // Insert a BEGIN symbol if we have multiple expressions.
     // See: 4.2.3  Sequencing
     // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-    if !result.is_nil() {
-        result = Object::make_begin(Object::reverse_list(result));
-    }
+    let result = if exprs.len() == 0 {
+        Object::Nil
+    } else if exprs.len() == 1 {
+        exprs.into_iter().nth(0).expect("todo")
+    } else {
+        let mut tail = Object::Nil;
+        for expr in exprs {
+            tail = Object::make_cons(expr, tail);
+        }
+        Object::make_begin(Object::reverse_list(tail))
+    };
 
     Ok(result)
 }
 
-fn build_ast_from_expr(pair: Pair<Rule>) -> Object {
+fn build_ast_from_quotation(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("todo")),
-        Rule::variable => Object::Symbol(pair.as_str().to_string()),
+        Rule::datum => Object::make_quote(build_ast_from_datum(
+            pair.into_inner().next().expect("todo"),
+        )),
         unexpected => panic!(
-            "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
+            "Cannot process `{:?}` rule in `quotation`! Pair: {:?}",
             unexpected, pair
         ),
     }
 }
 
-fn build_ast_from_literal(pair: Pair<Rule>) -> Object {
+fn build_ast_from_list(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::boolean => match pair.as_str() {
-            "#t" | "#T" => Object::Bool(true),
-            "#f" | "#F" => Object::Bool(false),
-            _ => panic!("Cannot convert `{}` to boolean object!", pair),
-        },
-        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
-        Rule::unit => Object::Nil,
-        Rule::string => {
-            let inner = pair.as_str();
-            Object::String(inner[1..inner.len() - 1].to_string())
-        }
-        Rule::character => {
-            let inner = &pair.as_str()[2..];
-            match inner {
-                "space" => Object::make_char(' ' as u32, 0),
-                "newline" => Object::make_char('\n' as u32, 0),
-                _ => Object::make_char(inner.chars().nth(0).expect("todo") as u32, 0),
+        Rule::list1 => {
+            let mut tail = Object::Nil;
+            for datum in pair.into_inner() {
+                tail = Object::make_cons(
+                    build_ast_from_datum(datum.into_inner().next().expect("todo")),
+                    tail,
+                );
             }
+            if !tail.is_nil() {
+                tail = Object::reverse_list(tail);
+            }
+            tail
+        }
+        Rule::list2 => {
+            let mut list = LinkedList::new();
+            for datum in pair.into_inner() {
+                list.push_back(build_ast_from_datum(
+                    datum.into_inner().next().expect("todo"),
+                ));
+            }
+
+            let last = list.pop_back().expect("todo");
+            let mut tail = Object::Nil;
+            for datum in list {
+                tail = Object::make_cons(datum, tail);
+            }
+
+            Object::reverse_list_with_tail(tail, last)
         }
         unexpected => panic!(
-            "Cannot process `{:?}` rule in `literal`! Pair: {:?}",
+            "Cannot process `{:?}` rule in `compound_datum`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_compound_datum(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::list => build_ast_from_list(pair.into_inner().next().expect("todo")),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `compound_datum`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_symbol(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::symbol => Object::Symbol(pair.to_string()),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `symbol`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_simple_datum(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::boolean => build_ast_from_boolean(pair),
+        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
+        Rule::character => build_ast_from_character(pair),
+        Rule::string => build_ast_from_string(pair),
+        Rule::symbol => build_ast_from_symbol(pair),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `simple_datum`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_datum(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::simple_datum => build_ast_from_simple_datum(pair.into_inner().next().expect("todo")),
+        Rule::compound_datum => {
+            build_ast_from_compound_datum(pair.into_inner().next().expect("todo"))
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `datum`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_expression(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("todo")),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
             unexpected, pair
         ),
     }
@@ -97,73 +172,52 @@ fn build_ast_from_number(pair: Pair<Rule>) -> Object {
     }
 }
 
-// See https://groups.csail.mit.edu/mac/ftpdir/scheme-reports/r5rs-html/r5rs_9.html
-// for syntax and semantics of MIT Scheme.
-
-fn parse_bool<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::Bool => {
-            // Advance the token cursor.
-            *token_cursor += 1;
-            if curr_token.literal() == "#t" {
-                Ok(Object::Bool(true))
-            } else if curr_token.literal() == "#f" {
-                Ok(Object::Bool(false))
-            } else {
-                // Unlikely to happend.
-                panic!("Cannot parse boolean value, expected '#t' or '#f'");
-            }
-        }
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
+fn build_ast_from_boolean(pair: Pair<Rule>) -> Object {
+    match pair.as_str() {
+        "#t" | "#T" => Object::Bool(true),
+        "#f" | "#F" => Object::Bool(false),
+        _ => panic!("Cannot convert `{}` to boolean object!", pair),
     }
 }
 
-fn parse_number<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::Int => match curr_token.literal().parse::<i64>() {
-            Ok(n) => {
-                *token_cursor += 1;
-                Ok(Object::Int(n))
-            }
-            Err(_) => Err(Errors::UnexpectedToken(
-                curr_token.line(),
-                curr_token.column(),
-            )),
-        },
-        TokenKind::Float => match curr_token.literal().parse::<f64>() {
-            Ok(f) => {
-                *token_cursor += 1;
-                Ok(Object::Real(f))
-            }
-            Err(_) => Err(Errors::UnexpectedToken(
-                curr_token.line(),
-                curr_token.column(),
-            )),
-        },
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
+fn build_ast_from_character(pair: Pair<Rule>) -> Object {
+    let inner = &pair.as_str()[2..];
+    match inner {
+        "space" => Object::make_char(' ' as u32, 0),
+        "newline" => Object::make_char('\n' as u32, 0),
+        _ => Object::make_char(inner.chars().nth(0).expect("todo") as u32, 0),
     }
 }
 
-fn parse_symbol<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::Symbol => {
-            let symbol = Object::Symbol(curr_token.literal().to_string());
-            *token_cursor += 1;
-            Ok(symbol)
+fn build_ast_from_string(pair: Pair<Rule>) -> Object {
+    let inner = pair.as_str();
+    Object::String(inner[1..inner.len() - 1].to_string())
+}
+
+fn build_ast_from_self_evaluating(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::boolean => build_ast_from_boolean(pair),
+        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
+        Rule::unit => Object::Nil,
+        Rule::string => build_ast_from_string(pair),
+        Rule::character => build_ast_from_character(pair),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `self_evaluating`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_ast_from_literal(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::self_evaluating => {
+            build_ast_from_self_evaluating(pair.into_inner().next().expect("todo"))
         }
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
+        Rule::quotation => build_ast_from_quotation(pair.into_inner().next().expect("todo")),
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `literal`! Pair: {:?}",
+            unexpected, pair
+        ),
     }
 }
 
@@ -225,225 +279,6 @@ fn parse_bucky_bits(bucky_bit: &str, line: i64, column: i64) -> Result<u32, Erro
     }
 }
 
-fn parse_char<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::Char => {
-            // This may not be necessary, but we check it anyway.
-            if curr_token.literal().len() <= 2 {
-                return Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ));
-            }
-
-            // Remove the '#\' part.
-            let char_part = &curr_token.literal()[2..];
-            // Split it by '-'
-            let char_tokens: Vec<_> = char_part.split("-").collect();
-            let mut bucky_bits = 0;
-            let mut char_code = 0;
-
-            for (tok_idx, tok) in char_tokens.iter().enumerate() {
-                if tok_idx != char_tokens.len() - 1 {
-                    bucky_bits |= parse_bucky_bits(tok, curr_token.line(), curr_token.column())?;
-                } else {
-                    char_code = parse_char_code(tok, curr_token.line(), curr_token.column())?;
-                }
-            }
-
-            *token_cursor += 1;
-            return Ok(Object::make_char(char_code, bucky_bits));
-        }
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
-    }
-}
-
-fn parse_string<'a>(tokens: &Vec<Token<'a>>, token_cursor: &mut usize) -> Result<Object, Errors> {
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::String => {
-            *token_cursor += 1;
-            let strlen = curr_token.literal().len();
-            return Ok(Object::String(
-                curr_token.literal()[1..strlen - 1].to_string(),
-            ));
-        }
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
-    }
-}
-
-fn parse_object_recursive<'a>(
-    tokens: &Vec<Token<'a>>,
-    token_cursor: &mut usize,
-) -> Result<Object, Errors> {
-    let token_len = tokens.len();
-
-    if *token_cursor >= token_len {
-        return Err(Errors::ExpectMoreToken);
-    }
-
-    let curr_token = tokens[*token_cursor];
-    match curr_token.kind() {
-        TokenKind::Dot => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
-        TokenKind::LeftParen => {
-            let mut tail = Object::Nil;
-
-            // Advance the cursor of token, eat '('.
-            *token_cursor += 1;
-            if *token_cursor >= token_len {
-                return Err(Errors::ExpectMoreToken);
-            }
-
-            let mut curr_token = tokens[*token_cursor];
-            while *token_cursor < token_len
-                && curr_token.kind() != TokenKind::RightParen
-                && curr_token.kind() != TokenKind::Dot
-            {
-                if let Ok(object) = parse_object_recursive(tokens, token_cursor) {
-                    tail = Object::make_cons(object, tail);
-                } else {
-                    return Err(Errors::UnexpectedToken(
-                        curr_token.line(),
-                        curr_token.column(),
-                    ));
-                }
-
-                if *token_cursor < token_len {
-                    curr_token = tokens[*token_cursor];
-                } else {
-                    return Err(Errors::ExpectMoreToken);
-                }
-            }
-
-            if curr_token.kind() == TokenKind::Dot {
-                // Advance the cursor.
-                *token_cursor += 1;
-                if *token_cursor >= token_len {
-                    return Err(Errors::ExpectMoreToken);
-                }
-
-                curr_token = tokens[*token_cursor];
-
-                if curr_token.kind() != TokenKind::RightParen {
-                    match parse_object_recursive(tokens, token_cursor) {
-                        Ok(object) => {
-                            tail = Object::reverse_list_with_tail(tail, object);
-
-                            // The cursor is incremented in parse_object_recursive(), we should
-                            // check the bound and update the curr_token.
-                            if *token_cursor >= token_len {
-                                return Err(Errors::ExpectMoreToken);
-                            }
-                            curr_token = tokens[*token_cursor];
-                        }
-                        Err(e) => return Err(e),
-                    }
-                }
-            } else {
-                tail = Object::reverse_list(tail);
-            }
-
-            if curr_token.kind() != TokenKind::RightParen {
-                return Err(Errors::UnexpectedToken(
-                    curr_token.line(),
-                    curr_token.column(),
-                ));
-            }
-
-            // Advance cursor, eat ')'.
-            *token_cursor += 1;
-
-            Ok(tail)
-        }
-        TokenKind::Float | TokenKind::Int => Ok(parse_number(tokens, token_cursor)?),
-        TokenKind::Bool => Ok(parse_bool(tokens, token_cursor)?),
-        TokenKind::Symbol => Ok(parse_symbol(tokens, token_cursor)?),
-        TokenKind::Char => Ok(parse_char(tokens, token_cursor)?),
-        TokenKind::String => Ok(parse_string(tokens, token_cursor)?),
-        TokenKind::Quote => {
-            *token_cursor += 1;
-            Ok(Object::make_quote(parse_object_recursive(
-                tokens,
-                token_cursor,
-            )?))
-        }
-        TokenKind::BackQuote => {
-            *token_cursor += 1;
-            Ok(Object::make_quasiquote(parse_object_recursive(
-                tokens,
-                token_cursor,
-            )?))
-        }
-        TokenKind::Comma => {
-            *token_cursor += 1;
-
-            // Look one more token ahead.
-            if *token_cursor >= token_len {
-                return Err(Errors::ExpectMoreToken);
-            }
-
-            let curr_token = tokens[*token_cursor];
-            match curr_token.kind() {
-                TokenKind::At => {
-                    *token_cursor += 1;
-                    Ok(Object::make_unquotesplice(parse_object_recursive(
-                        tokens,
-                        token_cursor,
-                    )?))
-                }
-                _ => Ok(Object::make_unquote(parse_object_recursive(
-                    tokens,
-                    token_cursor,
-                )?)),
-            }
-        }
-        _ => Err(Errors::UnexpectedToken(
-            curr_token.line(),
-            curr_token.column(),
-        )),
-    }
-}
-
-// pub fn parse_program(program: &str) -> Result<Object, Errors> {
-//     let tokenizer = Tokenizer::new(program)?;
-//     let tokens = tokenizer.tokens();
-//     let token_len = tokens.len();
-//     let mut token_cursor = 0;
-//     let mut result = parse_object_recursive(tokens, &mut token_cursor)?;
-//
-//     if token_cursor < token_len {
-//         result = Object::make_cons(result, Object::Nil);
-//
-//         while token_cursor < token_len {
-//             match parse_object_recursive(tokens, &mut token_cursor) {
-//                 Ok(object) => {
-//                     result = Object::make_cons(object, result);
-//                 }
-//                 Err(e) => {
-//                     return Err(e);
-//                 }
-//             }
-//         }
-//
-//         // Insert a BEGIN symbol if we have multiple expressions.
-//         // See: 4.2.3  Sequencing
-//         // https://conservatory.scheme.org/schemers/Documents/Standards/R5RS/HTML/
-//         result = Object::make_begin(Object::reverse_list(result));
-//     }
-//
-//     Ok(result)
-// }
-
 #[cfg(test)]
 mod tests {
     use super::R5RSParser;
@@ -455,18 +290,26 @@ mod tests {
     #[test]
     fn test_parse_list() {
         assert_eq!(
-            parse_program("(1 2 3)").unwrap(),
-            Object::make_cons(
+            parse_program("'(1 . 2)").unwrap(),
+            Object::make_quote(Object::make_cons(Object::Int(1), Object::Int(2)))
+        );
+        assert_eq!(
+            parse_program("'()").unwrap(),
+            Object::make_quote(Object::Nil)
+        );
+        assert_eq!(
+            parse_program("'(1 2 3)").unwrap(),
+            Object::make_quote(Object::make_cons(
                 Object::make_int(1),
                 Object::make_cons(
                     Object::make_int(2),
                     Object::make_cons(Object::make_int(3), Object::Nil)
                 )
-            )
+            ))
         );
 
         assert_eq!(
-            parse_program("(1 (2 3))").unwrap(),
+            parse_program("'(1 '(2 3))").unwrap(),
             Object::make_cons(
                 Object::make_int(1),
                 Object::make_cons(
@@ -793,64 +636,37 @@ mod tests {
         );
 
         // Parse program.
-        assert_eq!(
-            parse_program("#t").unwrap(),
-            Object::make_begin(Object::make_cons(Object::Bool(true), Object::Nil))
-        );
-        assert_eq!(
-            parse_program(" #f").unwrap(),
-            Object::make_begin(Object::make_cons(Object::Bool(false), Object::Nil))
-        );
+        assert_eq!(parse_program("#t").unwrap(), Object::Bool(true));
+        assert_eq!(parse_program(" #f").unwrap(), Object::Bool(false));
         assert_eq!(
             parse_program(" 123456789  ").unwrap(),
-            Object::make_begin(Object::make_cons(Object::Int(123456789), Object::Nil))
+            Object::Int(123456789)
         );
 
         assert_eq!(
             parse_program(" 123456789.12345  ").unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::Real(123456789.12345),
-                Object::Nil
-            ))
+            Object::Real(123456789.12345)
         );
-        assert_eq!(
-            parse_program("  (  )").unwrap(),
-            Object::make_begin(Object::make_cons(Object::Nil, Object::Nil))
-        );
+        assert_eq!(parse_program("  (  )").unwrap(), Object::Nil);
         assert_eq!(
             parse_program(r#" "hello, world! \\  \" " "#).unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::String(String::from(r#"hello, world! \\  \" "#)),
-                Object::Nil
-            ))
+            Object::String(String::from(r#"hello, world! \\  \" "#)),
         );
         assert_eq!(
             parse_program(r#" #\a "#).unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::make_char('a' as u32, 0),
-                Object::Nil
-            ))
+            Object::make_char('a' as u32, 0)
         );
         assert_eq!(
             parse_program(r#" #\newline "#).unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::make_char('\n' as u32, 0),
-                Object::Nil
-            ))
+            Object::make_char('\n' as u32, 0),
         );
         assert_eq!(
             parse_program(r#" #\space "#).unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::make_char(' ' as u32, 0),
-                Object::Nil
-            ))
+            Object::make_char(' ' as u32, 0),
         );
         assert_eq!(
             parse_program(r#" a "#).unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::Symbol(String::from("a")),
-                Object::Nil
-            ))
+            Object::Symbol(String::from("a")),
         );
         assert_eq!(
             parse_program(
@@ -862,10 +678,7 @@ bbb
 "#
             )
             .unwrap(),
-            Object::make_begin(Object::make_cons(
-                Object::Symbol(String::from("bbb")),
-                Object::Nil
-            ))
+            Object::Symbol(String::from("bbb")),
         );
     }
 }
