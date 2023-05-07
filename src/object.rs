@@ -1,6 +1,5 @@
 use crate::builtins::BuiltinFuncSig;
 use crate::error::Errors;
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::default::Default;
@@ -42,15 +41,14 @@ pub enum Object {
     Quote(Rc<RefCell<Object>>),
     // Some special builtin symbols for parsed AST.
     Begin(Rc<RefCell<Object>>),
-    If {
-        condition: Rc<RefCell<Object>>,
-        then: Rc<RefCell<Object>>,
-        otherwise: Rc<RefCell<Object>>,
+    Conditional {
+        test: Rc<RefCell<Object>>,
+        consequent: Rc<RefCell<Object>>,
+        alternative: Rc<RefCell<Object>>,
     },
     Define(String, Rc<RefCell<Object>>),
     Set(String, Rc<RefCell<Object>>),
     Lambda {
-        env: Rc<RefCell<Object>>,
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
     },
@@ -115,6 +113,35 @@ impl Object {
 
     pub fn make_real(n: f64) -> Object {
         Object::Real(n)
+    }
+
+    pub fn make_conditional(test: Object, consequent: Object, alternative: Object) -> Object {
+        Object::Conditional {
+            test: Rc::new(RefCell::new(test)),
+            consequent: Rc::new(RefCell::new(consequent)),
+            alternative: Rc::new(RefCell::new(alternative)),
+        }
+    }
+
+    pub fn make_define(symbol: &str, expression: Object) -> Object {
+        Object::Define(symbol.to_string(), Rc::new(RefCell::new(expression)))
+    }
+
+    pub fn make_lambda_expression(formals: LambdaFormal, body: Object) -> Object {
+        Object::Lambda {
+            formals: Rc::new(RefCell::new(formals)),
+            body: Rc::new(RefCell::new(body)),
+        }
+    }
+
+    pub fn make_let_expression(
+        bindings: Vec<(String, Rc<RefCell<Object>>)>,
+        body: Object,
+    ) -> Object {
+        Object::Let {
+            bindings,
+            body: Rc::new(RefCell::new(body)),
+        }
     }
 
     pub fn is_cons(&self) -> bool {
@@ -291,7 +318,7 @@ impl Object {
             Object::UnquoteSplice(ref unqspl) => {
                 format!("(unquote-splicing {})", unqspl.borrow().to_string())
             }
-            _ => todo!(),
+            o => todo!("{:?}", o),
         }
     }
 }

@@ -364,6 +364,7 @@ expression = {
   | lambda_expression
   | conditional
   | assignment
+  | derived_expression
 }
 
 // <literal> --> <quotation> | <self-evaluating>
@@ -399,17 +400,19 @@ lambda_expression = { "(" ~ "lambda" ~ formals ~ body ~ ")" }
 // <formals> --> (<variable>*) | <variable>
 //      | (<variable>+ . <variable>)
 formals = {
-    "(" ~ variable* ~ ")"
-  | variable
-  | "(" ~ variable+ ~ "." ~ variable ~ ")"
+    lambda_formals1
+  | lambda_formals2
+  | lambda_formals3
 }
+
+lambda_formals1 = { variable }
+lambda_formals2 = { "(" ~ variable* ~ ")" }
+lambda_formals3 = { "(" ~ variable+ ~ "." ~ variable ~ ")" }
 
 // <body> --> <definition>* <sequence>
 body = { definition* ~ sequence }
 
 // <sequence> --> <command>* <expression>
-// FIXME: If we write it as `command* ~ expression`, it will cause parse error and
-//        I don't know why...
 sequence = { expression+ }
 
 // <command> --> <expression>
@@ -419,13 +422,13 @@ command = _{ expression }
 conditional = { "(" ~ "if" ~ test ~ consequent ~ alternate? ~ ")" }
 
 // <test> --> <expression>
-test = { expression }
+test = _{ expression }
 
 // <consequent> --> <expression>
-consequent = { expression }
+consequent = _{ expression }
 
 // <alternate> --> <expression> | <empty>
-alternate = { expression }
+alternate = _{ expression }
 
 // <assignment> --> (set! <variable> <expression>)
 assignment = { "(" ~ "set!" ~ variable ~ expression ~ ")" }
@@ -450,13 +453,22 @@ assignment = { "(" ~ "set!" ~ variable ~ expression ~ ")" }
 //          <command>*)
 //      | (delay <expression>)
 //      | <quasiquotation>
-//
+derived_expression = {
+    derived_let1
+  | derived_begin
+}
+
+derived_let1  = { "(" ~ "let" ~ "(" ~ binding_spec* ~ ")" ~ body ~ ")" }
+derived_begin = { "(" ~ "begin" ~ sequence ~ ")" }
+
 // <cond clause> --> (<test> <sequence>)
 //       | (<test>)
 //       | (<test> => <recipient>)
 // <recipient> --> <expression>
 // <case clause> --> ((<datum>*) <sequence>)
 // <binding spec> --> (<variable> <expression>)
+binding_spec = { "(" ~ variable ~ expression ~ ")" }
+
 // <iteration spec> --> (<variable> <init> <step>)
 //     | (<variable> <init>)
 // <init> --> <expression>
@@ -526,9 +538,11 @@ definition = {
 // <def formals> --> <variable>*
 //       | <variable>* . <variable>
 def_formals = {
-    variable* ~ "." ~ variable
-  | variable*
+    def_formals1
+  | def_formals2
 }
+def_formals1 = { variable* ~ "." ~ variable }
+def_formals2 = { variable* }
 
 // <syntax definition> -->
 //      (define-syntax <keyword> <transformer spec>)

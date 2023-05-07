@@ -1,11 +1,13 @@
-use std::collections::LinkedList;
-
 use crate::error::Errors;
-use crate::object::Object;
+use crate::object::{LambdaFormal, Object};
 use crate::tokenizer::{Token, TokenKind, Tokenizer};
 use pest::iterators::Pair;
 use pest::Parser;
 use pest_derive::Parser;
+use std::cell::RefCell;
+use std::collections::LinkedList;
+use std::fmt::format;
+use std::rc::Rc;
 
 #[derive(Parser)]
 #[grammar = "r5rs.pest"] // relative to src
@@ -17,9 +19,12 @@ pub fn parse_program(prog: &str) -> Result<Object, Errors> {
 
     for pair in pairs {
         match pair.as_rule() {
-            Rule::expression => exprs.push(build_ast_from_expression(
-                pair.into_inner().next().expect("todo"),
-            )),
+            Rule::expression => {
+                exprs.push(build_expression(pair.into_inner().next().expect("todo")))
+            }
+            Rule::definition => {
+                exprs.push(build_definition(pair.into_inner().next().expect("todo")))
+            }
             Rule::EOI => {
                 // TODO?
             }
@@ -50,11 +55,84 @@ pub fn parse_program(prog: &str) -> Result<Object, Errors> {
     Ok(result)
 }
 
-fn build_ast_from_quotation(pair: Pair<Rule>) -> Object {
+fn build_definition(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::datum => Object::make_quote(build_ast_from_datum(
-            pair.into_inner().next().expect("todo"),
-        )),
+        Rule::definition1 => {
+            let mut inner = pair.into_inner();
+            let variable = inner.next().expect("todo");
+            let expr = build_expression(
+                inner
+                    .next()
+                    .expect("todo")
+                    .into_inner()
+                    .next()
+                    .expect("todo"),
+            );
+            assert_eq!(variable.as_rule(), Rule::variable);
+            Object::make_define(variable.as_str(), expr)
+        }
+        Rule::definition2 => {
+            let mut inner = pair.into_inner();
+            let variable = inner.next().expect("todo");
+            assert_eq!(variable.as_rule(), Rule::variable);
+
+            let def_formals = inner
+                .next()
+                .expect("todo")
+                .into_inner()
+                .next()
+                .expect("todo");
+            let def_formals = match def_formals.as_rule() {
+                Rule::def_formals1 => todo!("{:?}", def_formals),
+                Rule::def_formals2 => LambdaFormal::Fixed(
+                    def_formals
+                        .into_inner()
+                        .into_iter()
+                        .map(|variable| variable.as_str().to_string())
+                        .collect(),
+                ),
+                unexpected => panic!(
+                    "Cannot process `{:?}` rule in `definition`! Pair: {:?}",
+                    unexpected, def_formals
+                ),
+            };
+
+            let sequence = inner
+                .next()
+                .expect("todo")
+                .into_inner()
+                .next()
+                .expect("todo");
+            let mut body = Object::Nil;
+            for expr in sequence.into_inner() {
+                body = Object::make_cons(
+                    build_expression(expr.into_inner().next().expect("todo")),
+                    body,
+                );
+            }
+
+            if !body.is_nil() {
+                body = Object::reverse_list(body);
+            }
+
+            Object::make_define(
+                variable.as_str(),
+                Object::make_lambda_expression(def_formals, Object::make_begin(body)),
+            )
+        }
+        Rule::definition3 => {
+            todo!()
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `definition`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_quotation(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::datum => Object::make_quote(build_datum(pair.into_inner().next().expect("todo"))),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `quotation`! Pair: {:?}",
             unexpected, pair
@@ -62,15 +140,13 @@ fn build_ast_from_quotation(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_list(pair: Pair<Rule>) -> Object {
+fn build_list(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::list1 => {
             let mut tail = Object::Nil;
             for datum in pair.into_inner() {
-                tail = Object::make_cons(
-                    build_ast_from_datum(datum.into_inner().next().expect("todo")),
-                    tail,
-                );
+                tail =
+                    Object::make_cons(build_datum(datum.into_inner().next().expect("todo")), tail);
             }
             if !tail.is_nil() {
                 tail = Object::reverse_list(tail);
@@ -80,9 +156,7 @@ fn build_ast_from_list(pair: Pair<Rule>) -> Object {
         Rule::list2 => {
             let mut list = LinkedList::new();
             for datum in pair.into_inner() {
-                list.push_back(build_ast_from_datum(
-                    datum.into_inner().next().expect("todo"),
-                ));
+                list.push_back(build_datum(datum.into_inner().next().expect("todo")));
             }
 
             let last = list.pop_back().expect("todo");
@@ -93,6 +167,28 @@ fn build_ast_from_list(pair: Pair<Rule>) -> Object {
 
             Object::reverse_list_with_tail(tail, last)
         }
+        Rule::abbreviation => {
+            let mut prefix_datum = pair.into_inner();
+            let prefix = prefix_datum.next().expect("todo");
+            let datum = prefix_datum.next().expect("todo");
+            match prefix.as_str() {
+                "'" => Object::make_quote(build_datum(datum.into_inner().next().expect("todo"))),
+                "`" => todo!("quasiquote"),
+                "," => todo!("unquote"),
+                ",@" => todo!("unquote-splice"),
+                p => panic!("Unrecognized prefix: {}", p),
+            }
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `list`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_compound_datum(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::list => build_list(pair.into_inner().next().expect("todo")),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `compound_datum`! Pair: {:?}",
             unexpected, pair
@@ -100,19 +196,10 @@ fn build_ast_from_list(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_compound_datum(pair: Pair<Rule>) -> Object {
+fn build_symbol_or_variable(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::list => build_ast_from_list(pair.into_inner().next().expect("todo")),
-        unexpected => panic!(
-            "Cannot process `{:?}` rule in `compound_datum`! Pair: {:?}",
-            unexpected, pair
-        ),
-    }
-}
-
-fn build_ast_from_symbol(pair: Pair<Rule>) -> Object {
-    match pair.as_rule() {
-        Rule::symbol => Object::Symbol(pair.to_string()),
+        Rule::symbol => Object::Symbol(pair.as_str().to_string()),
+        Rule::variable => Object::Symbol(pair.as_str().to_string()),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `symbol`! Pair: {:?}",
             unexpected, pair
@@ -120,13 +207,13 @@ fn build_ast_from_symbol(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_simple_datum(pair: Pair<Rule>) -> Object {
+fn build_simple_datum(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::boolean => build_ast_from_boolean(pair),
-        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
-        Rule::character => build_ast_from_character(pair),
-        Rule::string => build_ast_from_string(pair),
-        Rule::symbol => build_ast_from_symbol(pair),
+        Rule::boolean => build_boolean(pair),
+        Rule::number => build_number(pair.into_inner().next().expect("todo")),
+        Rule::character => build_character(pair),
+        Rule::string => build_string(pair),
+        Rule::symbol => build_symbol_or_variable(pair),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `simple_datum`! Pair: {:?}",
             unexpected, pair
@@ -134,12 +221,10 @@ fn build_ast_from_simple_datum(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_datum(pair: Pair<Rule>) -> Object {
+fn build_datum(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::simple_datum => build_ast_from_simple_datum(pair.into_inner().next().expect("todo")),
-        Rule::compound_datum => {
-            build_ast_from_compound_datum(pair.into_inner().next().expect("todo"))
-        }
+        Rule::simple_datum => build_simple_datum(pair.into_inner().next().expect("todo")),
+        Rule::compound_datum => build_compound_datum(pair.into_inner().next().expect("todo")),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `datum`! Pair: {:?}",
             unexpected, pair
@@ -147,9 +232,191 @@ fn build_ast_from_datum(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_expression(pair: Pair<Rule>) -> Object {
+fn build_conditional(pair: Pair<Rule>) -> Object {
+    let mut inner = pair.into_inner();
+    let test = build_expression(
+        inner
+            .next()
+            .expect("todo")
+            .into_inner()
+            .next()
+            .expect("todo"),
+    );
+    let consequent = build_expression(
+        inner
+            .next()
+            .expect("todo")
+            .into_inner()
+            .next()
+            .expect("todo"),
+    );
+    let alternative = match inner.next() {
+        None => Object::Unspecified,
+        Some(alt) => build_expression(alt.into_inner().next().expect("todo")),
+    };
+    Object::make_conditional(test, consequent, alternative)
+}
+
+fn build_procedure_call(pair: Pair<Rule>) -> Object {
+    let inner = pair.into_inner();
+    let mut operator_operands = Object::Nil;
+
+    for expr in inner {
+        operator_operands = Object::make_cons(
+            build_expression(
+                expr.into_inner()
+                    .next()
+                    .expect("todo")
+                    .into_inner()
+                    .next()
+                    .expect("todo"),
+            ),
+            operator_operands,
+        );
+    }
+
+    Object::reverse_list(operator_operands)
+}
+
+fn build_body(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::literal => build_ast_from_literal(pair.into_inner().next().expect("todo")),
+        Rule::body => {
+            let mut body = Object::Nil;
+            let inner = pair.into_inner();
+            for definition_or_sequence in inner {
+                match definition_or_sequence.as_rule() {
+                    Rule::definition => {
+                        body = Object::make_cons(
+                            build_definition(
+                                definition_or_sequence.into_inner().next().expect("todo"),
+                            ),
+                            body,
+                        );
+                    }
+                    Rule::sequence => {
+                        for seq in definition_or_sequence.into_inner() {
+                            body = Object::make_cons(
+                                build_expression(seq.into_inner().next().expect("todo")),
+                                body,
+                            );
+                        }
+                    }
+                    unexpected => panic!(
+                        "Cannot process `{:?}` rule in `body`! Pair: {:?}",
+                        unexpected, definition_or_sequence
+                    ),
+                }
+            }
+
+            Object::make_begin(Object::reverse_list(body))
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `body`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_derived_expression(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::derived_begin => {
+            let inner = pair.into_inner().next().expect("todo").into_inner();
+            let mut sequence = Object::Nil;
+            for expr in inner {
+                sequence = Object::make_cons(
+                    build_expression(expr.into_inner().next().expect("todo")),
+                    sequence,
+                );
+            }
+            Object::make_begin(Object::reverse_list(sequence))
+        }
+        Rule::derived_let1 => {
+            let mut bindings = vec![];
+            let inner = pair.into_inner();
+            let mut body = Object::Nil;
+            for binding_or_body in inner {
+                match binding_or_body.as_rule() {
+                    Rule::binding_spec => {
+                        let mut inner = binding_or_body.into_inner();
+                        let variable = inner.next().expect("todo");
+                        let expression = inner.next().expect("todo");
+                        bindings.push((
+                            variable.as_str().to_string(),
+                            Rc::new(RefCell::new(build_expression(
+                                expression.into_inner().next().expect("todo"),
+                            ))),
+                        ));
+                    }
+                    Rule::body => {
+                        body = build_body(binding_or_body);
+                    }
+                    unexpected => panic!(
+                        "Cannot process `{:?}` rule in `derived_expression`! Pair: {:?}",
+                        unexpected, binding_or_body
+                    ),
+                }
+            }
+            Object::make_let_expression(bindings, body)
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `derived_expression`! Pair: {:?}",
+            unexpected, pair
+        ),
+    }
+}
+
+fn build_lambda_expression(pair: Pair<Rule>) -> Object {
+    let mut inner = pair.into_inner();
+    let formals = inner
+        .next()
+        .expect("todo")
+        .into_inner()
+        .next()
+        .expect("todo");
+
+    let lambda_formals = match formals.as_rule() {
+        Rule::lambda_formals1 => {
+            let formals = formals.into_inner().next().expect("todo");
+            assert_eq!(formals.as_rule(), Rule::variable);
+            LambdaFormal::Any(formals.as_str().to_string())
+        }
+        Rule::lambda_formals2 => {
+            let formals = formals.into_inner();
+            let mut fixed = vec![];
+            for expr in formals {
+                fixed.push(expr.as_str().to_string());
+            }
+            LambdaFormal::Fixed(fixed)
+        }
+        Rule::lambda_formals3 => {
+            let formals = formals.into_inner();
+            let mut at_least_n = LinkedList::new();
+            for expr in formals {
+                at_least_n.push_back(expr.as_str().to_string());
+            }
+            let last = at_least_n.pop_back().expect("todo");
+            LambdaFormal::AtLeastN(at_least_n.into_iter().collect(), last)
+        }
+        unexpected => panic!(
+            "Cannot process `{:?}` rule in `lambda_expression`! Pair: {:?}",
+            unexpected, formals
+        ),
+    };
+
+    let body = inner.next().expect("todo");
+    Object::make_lambda_expression(lambda_formals, build_body(body))
+}
+
+fn build_expression(pair: Pair<Rule>) -> Object {
+    match pair.as_rule() {
+        Rule::literal => build_literal(pair.into_inner().next().expect("todo")),
+        Rule::conditional => build_conditional(pair),
+        Rule::procedure_call => build_procedure_call(pair),
+        Rule::variable => build_symbol_or_variable(pair),
+        Rule::derived_expression => {
+            build_derived_expression(pair.into_inner().next().expect("todo"))
+        }
+        Rule::lambda_expression => build_lambda_expression(pair),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
             unexpected, pair
@@ -157,7 +424,7 @@ fn build_ast_from_expression(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_number(pair: Pair<Rule>) -> Object {
+fn build_number(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::num10 => {
             // FIXME: Support more numeric types!
@@ -172,7 +439,7 @@ fn build_ast_from_number(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_boolean(pair: Pair<Rule>) -> Object {
+fn build_boolean(pair: Pair<Rule>) -> Object {
     match pair.as_str() {
         "#t" | "#T" => Object::Bool(true),
         "#f" | "#F" => Object::Bool(false),
@@ -180,7 +447,7 @@ fn build_ast_from_boolean(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_character(pair: Pair<Rule>) -> Object {
+fn build_character(pair: Pair<Rule>) -> Object {
     let inner = &pair.as_str()[2..];
     match inner {
         "space" => Object::make_char(' ' as u32, 0),
@@ -189,18 +456,18 @@ fn build_ast_from_character(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_string(pair: Pair<Rule>) -> Object {
+fn build_string(pair: Pair<Rule>) -> Object {
     let inner = pair.as_str();
     Object::String(inner[1..inner.len() - 1].to_string())
 }
 
-fn build_ast_from_self_evaluating(pair: Pair<Rule>) -> Object {
+fn build_self_evaluating(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::boolean => build_ast_from_boolean(pair),
-        Rule::number => build_ast_from_number(pair.into_inner().next().expect("todo")),
+        Rule::boolean => build_boolean(pair),
+        Rule::number => build_number(pair.into_inner().next().expect("todo")),
         Rule::unit => Object::Nil,
-        Rule::string => build_ast_from_string(pair),
-        Rule::character => build_ast_from_character(pair),
+        Rule::string => build_string(pair),
+        Rule::character => build_character(pair),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `self_evaluating`! Pair: {:?}",
             unexpected, pair
@@ -208,12 +475,10 @@ fn build_ast_from_self_evaluating(pair: Pair<Rule>) -> Object {
     }
 }
 
-fn build_ast_from_literal(pair: Pair<Rule>) -> Object {
+fn build_literal(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
-        Rule::self_evaluating => {
-            build_ast_from_self_evaluating(pair.into_inner().next().expect("todo"))
-        }
-        Rule::quotation => build_ast_from_quotation(pair.into_inner().next().expect("todo")),
+        Rule::self_evaluating => build_self_evaluating(pair.into_inner().next().expect("todo")),
+        Rule::quotation => build_quotation(pair.into_inner().next().expect("todo")),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `literal`! Pair: {:?}",
             unexpected, pair
@@ -309,36 +574,49 @@ mod tests {
         );
 
         assert_eq!(
-            parse_program("'(1 '(2 3))").unwrap(),
-            Object::make_cons(
-                Object::make_int(1),
-                Object::make_cons(
-                    Object::make_cons(
-                        Object::make_int(2),
-                        Object::make_cons(Object::make_int(3), Object::Nil)
-                    ),
-                    Object::Nil
-                )
-            ),
+            parse_program("'(1 . '(2 3))").unwrap(),
+            Object::make_quote(Object::make_cons(
+                Object::Int(1),
+                Object::make_quote(Object::make_cons(
+                    Object::Int(2),
+                    Object::make_cons(Object::Int(3), Object::Nil)
+                ))
+            ))
         );
 
         assert_eq!(
-            parse_program("(1 -2 -3) (+1 -2 -3)").unwrap(),
-            Object::make_begin(Object::make_cons(
+            parse_program("'(1 '(2 3))").unwrap(),
+            Object::make_quote(Object::make_cons(
+                Object::Int(1),
                 Object::make_cons(
-                    Object::make_int(1),
-                    Object::make_cons(
-                        Object::make_int(-2),
-                        Object::make_cons(Object::make_int(-3), Object::Nil)
-                    )
-                ),
+                    Object::make_quote(Object::make_cons(
+                        Object::Int(2),
+                        Object::make_cons(Object::Int(3), Object::Nil)
+                    )),
+                    Object::Nil
+                )
+            ))
+        );
+
+        assert_eq!(
+            parse_program("'(1 -2 #t)").unwrap(),
+            Object::make_quote(Object::make_cons(
+                Object::make_int(1),
+                Object::make_cons(
+                    Object::make_int(-2),
+                    Object::make_cons(Object::Bool(true), Object::Nil)
+                )
+            ))
+        );
+
+        assert_eq!(
+            parse_program("'(#f (-2.5 3))").unwrap(),
+            Object::make_quote(Object::make_cons(
+                Object::Bool(false),
                 Object::make_cons(
                     Object::make_cons(
-                        Object::make_int(1),
-                        Object::make_cons(
-                            Object::make_int(-2),
-                            Object::make_cons(Object::make_int(-3), Object::Nil)
-                        )
+                        Object::make_real(-2.5),
+                        Object::make_cons(Object::make_int(3), Object::Nil)
                     ),
                     Object::Nil
                 )
@@ -346,50 +624,11 @@ mod tests {
         );
 
         assert_eq!(
-            parse_program("(1 (-2.5 3))").unwrap(),
-            Object::make_cons(
-                Object::make_int(1),
-                Object::make_cons(
-                    Object::make_cons(
-                        Object::make_real(-2.5),
-                        Object::make_cons(Object::make_int(3), Object::Nil)
-                    ),
-                    Object::Nil
-                )
-            )
-        );
-
-        assert_eq!(
-            parse_program("(1 -2 #t)").unwrap(),
-            Object::make_cons(
-                Object::make_int(1),
-                Object::make_cons(
-                    Object::make_int(-2),
-                    Object::make_cons(Object::Bool(true), Object::Nil)
-                )
-            )
-        );
-
-        assert_eq!(
-            parse_program("(#f (-2.5 3))").unwrap(),
-            Object::make_cons(
-                Object::Bool(false),
-                Object::make_cons(
-                    Object::make_cons(
-                        Object::make_real(-2.5),
-                        Object::make_cons(Object::make_int(3), Object::Nil)
-                    ),
-                    Object::Nil
-                )
-            )
-        );
-
-        assert_eq!(
-            parse_program("(#f . (-2.5 . 3))").unwrap(),
-            Object::make_cons(
+            parse_program("'(#f . (-2.5 . 3))").unwrap(),
+            Object::make_quote(Object::make_cons(
                 Object::Bool(false),
                 Object::make_cons(Object::make_real(-2.5), Object::make_int(3))
-            )
+            ))
         );
 
         assert_eq!(
@@ -399,46 +638,6 @@ mod tests {
                 Object::make_cons(
                     Object::make_int(1),
                     Object::make_cons(Object::make_int(3), Object::Nil)
-                )
-            )
-        );
-
-        assert_eq!(parse_program("()").unwrap(), Object::Nil);
-
-        assert_eq!(
-            parse_program(
-                "(#\\a #\\b #\\c  #\\space #\\c-a #\\control-a #\\meta-b #\\0 #\\9 #\\liNeFeed)"
-            )
-            .unwrap(),
-            Object::make_cons(
-                Object::make_char(97, 0),
-                Object::make_cons(
-                    Object::make_char(98, 0),
-                    Object::make_cons(
-                        Object::make_char(99, 0),
-                        Object::make_cons(
-                            Object::make_char(32, 0),
-                            Object::make_cons(
-                                Object::make_char(97, 2),
-                                Object::make_cons(
-                                    Object::make_char(97, 2),
-                                    Object::make_cons(
-                                        Object::make_char(98, 1),
-                                        Object::make_cons(
-                                            Object::make_char(48, 0),
-                                            Object::make_cons(
-                                                Object::make_char(57, 0),
-                                                Object::make_cons(
-                                                    Object::make_char(10, 0),
-                                                    Object::Nil
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
                 )
             )
         );
@@ -455,13 +654,7 @@ mod tests {
         assert_eq!(
             parse_program("(define foo 1) foo").unwrap(),
             Object::make_begin(Object::make_cons(
-                Object::make_cons(
-                    Object::Symbol(String::from("define")),
-                    Object::make_cons(
-                        Object::Symbol(String::from("foo")),
-                        Object::make_cons(Object::make_int(1), Object::Nil)
-                    )
-                ),
+                Object::make_define("foo", Object::Int(1)),
                 Object::make_cons(Object::Symbol(String::from("foo")), Object::Nil)
             ))
         );

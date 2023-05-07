@@ -53,7 +53,6 @@ fn make_define_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Resu
         // Construct a lambda expression.
         let fun_name = fun_name_with_args[0].borrow().symbol_name();
         let lambda_expr = Object::Lambda {
-            env: env.clone(),
             formals: Rc::new(RefCell::new(LambdaFormal::Fixed(args))),
             body: define_body[1].clone(),
         };
@@ -75,10 +74,10 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         )));
     }
 
-    Ok(Object::If {
-        condition: if_body[0].clone(),
-        then: if_body[1].clone(),
-        otherwise: if if_body.len() == 3 {
+    Ok(Object::Conditional {
+        test: if_body[0].clone(),
+        consequent: if_body[1].clone(),
+        alternative: if if_body.len() == 3 {
             if_body[2].clone()
         } else {
             Rc::new(RefCell::new(Object::Unspecified))
@@ -95,7 +94,7 @@ fn make_if_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 //      The procedure takes exactly the N number of arguments.
 // 3) (<variable1> <variable2> ... <variable<N-1>> . <variable<N>>)
 //      The procedure takes N or more arguments.
-fn make_lambda_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     let lambda_body = Object::cons_to_vec(expr.clone())?;
     if lambda_body.len() < 2 {
         return Err(Errors::RuntimeException(format!(
@@ -115,7 +114,6 @@ fn make_lambda_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Resu
     match &*lambda_body[0].clone().borrow() {
         // Any.
         Object::Symbol(ref formal) => Ok(Object::Lambda {
-            env: env.clone(),
             formals: Rc::new(RefCell::new(LambdaFormal::Any(formal.clone()))),
             body: Rc::new(RefCell::new(tail)),
         }),
@@ -142,12 +140,10 @@ fn make_lambda_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Resu
 
             match last_symbol {
                 Some(last_sym) => Ok(Object::Lambda {
-                    env: env.clone(),
                     formals: Rc::new(RefCell::new(LambdaFormal::AtLeastN(formals, last_sym))),
                     body: Rc::new(RefCell::new(tail)),
                 }),
                 None => Ok(Object::Lambda {
-                    env: env.clone(),
                     formals: Rc::new(RefCell::new(LambdaFormal::Fixed(formals))),
                     body: Rc::new(RefCell::new(tail)),
                 }),
@@ -451,10 +447,7 @@ impl Machine {
                 Object::Nil,
                 // For closures, we need to capture the environment in which the
                 // closure is defined.
-                Some(Rc::new(RefCell::new(make_lambda_expr(
-                    self.env.clone(),
-                    expr,
-                )?))),
+                Some(Rc::new(RefCell::new(make_lambda_expr(expr)?))),
             )),
             "LET" => Ok((
                 Object::Nil,
@@ -725,14 +718,13 @@ impl Machine {
                 self.eval_callable_symbol(symbol_name.as_str(), cdr)
             }
             Object::Lambda {
-                ref env,
                 ref formals,
                 ref body,
             } => {
                 // Apply lambda expression against 'cdr'.
-                self.eval_lambda_expr(env.clone(), formals.clone(), body.clone(), cdr.clone())
+                self.eval_lambda_expr(self.env.clone(), formals.clone(), body.clone(), cdr.clone())
             }
-            Object::Cons { .. } => {
+            Object::Cons { .. } | Object::Conditional { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
                 // it against 'cdr'.
                 self.stack.push(car.clone());
@@ -749,7 +741,7 @@ impl Machine {
                 self.eval_builtin_func(builtin_func.clone(), cdr.clone())
             }
             ref o => Err(Errors::RuntimeException(format!(
-                "Object '{}' is not callable",
+                "Object '{:?}' is not callable",
                 o
             ))),
         }
@@ -959,10 +951,10 @@ impl Machine {
             Object::Set(ref symbol_name, ref expr) => {
                 self.eval_set_expr(symbol_name.as_str(), expr.clone())
             }
-            Object::If {
-                ref condition,
-                ref then,
-                ref otherwise,
+            Object::Conditional {
+                test: ref condition,
+                consequent: ref then,
+                alternative: ref otherwise,
             } => self.eval_if_expr(condition.clone(), then.clone(), otherwise.clone()),
             Object::Symbol(ref symbol_name) => {
                 let resolved_sym = Self::resolve_symbol(self.env.clone(), symbol_name.as_str())?
@@ -1062,13 +1054,6 @@ mod tests {
             // "(begin 1 2)"
             m.eval(parse_program("(begin 1 2)").unwrap()).unwrap(),
             Object::make_int(2)
-        );
-        assert_eq!(m.stack.len(), 0);
-
-        assert_eq!(
-            // "(begin)"
-            m.eval(parse_program("(begin)").unwrap()).unwrap(),
-            Object::Nil
         );
         assert_eq!(m.stack.len(), 0);
 
