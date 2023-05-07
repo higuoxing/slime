@@ -1,13 +1,11 @@
-use crate::error::Errors;
-use crate::object::{LambdaFormal, Object};
-use crate::tokenizer::{Token, TokenKind, Tokenizer};
-use pest::iterators::Pair;
-use pest::Parser;
+use crate::{
+    error::Errors,
+    object::{LambdaFormal, Object},
+    tokenizer::{Token, TokenKind, Tokenizer},
+};
+use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
-use std::cell::RefCell;
-use std::collections::LinkedList;
-use std::fmt::format;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::LinkedList, fmt::format, rc::Rc};
 
 #[derive(Parser)]
 #[grammar = "r5rs.pest"] // relative to src
@@ -546,10 +544,8 @@ fn parse_bucky_bits(bucky_bit: &str, line: i64, column: i64) -> Result<u32, Erro
 
 #[cfg(test)]
 mod tests {
-    use super::R5RSParser;
-    use super::Rule;
-    use crate::object::Object;
-    use crate::parser::parse_program;
+    use super::{R5RSParser, Rule};
+    use crate::{object::Object, parser::parse_program};
     use pest::Parser;
 
     #[test]

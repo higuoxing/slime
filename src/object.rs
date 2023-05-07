@@ -1,10 +1,5 @@
-use crate::builtins::BuiltinFuncSig;
-use crate::error::Errors;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::default::Default;
-use std::fmt;
-use std::rc::Rc;
+use crate::{builtins::BuiltinFuncSig, error::Errors};
+use std::{cell::RefCell, collections::HashMap, default::Default, fmt, rc::Rc};
 
 #[derive(Debug, PartialEq)]
 pub enum LambdaFormal {
@@ -332,8 +327,7 @@ impl fmt::Display for Object {
 #[cfg(test)]
 mod tests {
     use crate::object::Object;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
 
     #[test]
     fn test_cons_to_vec() {

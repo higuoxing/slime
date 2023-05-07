@@ -1,7 +1,9 @@
-use inkwell::builder::Builder;
-use inkwell::context::Context;
-use inkwell::execution_engine::{ExecutionEngine, JitFunction};
-use inkwell::module::Module;
+use inkwell::{
+    builder::Builder,
+    context::Context,
+    execution_engine::{ExecutionEngine, JitFunction},
+    module::Module,
+};
 
 type SumFunc = unsafe extern "C" fn(u64, u64, u64) -> u64;
 
@@ -37,8 +39,7 @@ impl<'ctx> CodeGen<'ctx> {
 #[cfg(test)]
 mod tests {
     use super::CodeGen;
-    use inkwell::context::Context;
-    use inkwell::OptimizationLevel;
+    use inkwell::{context::Context, OptimizationLevel};
 
     #[test]
     fn test_codegen() {

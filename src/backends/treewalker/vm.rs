@@ -1,10 +1,10 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::builtins::{make_prelude_env, BuiltinFuncSig};
-use crate::error::Errors;
-use crate::object::{LambdaFormal, Object};
+use crate::{
+    builtins::{make_prelude_env, BuiltinFuncSig},
+    error::Errors,
+    object::{LambdaFormal, Object},
+};
 
 // Construct the 'begin' expression from a expr.
 fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {

@@ -1,8 +1,5 @@
-use crate::error::Errors;
-use crate::object::Object;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::rc::Rc;
+use crate::{error::Errors, object::Object};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 pub type BuiltinFuncSig = fn(Rc<RefCell<Object>>) -> Result<Object, Errors>;
 
