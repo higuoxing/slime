@@ -365,6 +365,8 @@ expression = {
   | conditional
   | assignment
   | derived_expression
+// TODO: Explain why.
+  | definition
 }
 
 // <literal> --> <quotation> | <self-evaluating>
@@ -410,7 +412,11 @@ lambda_formals2 = { "(" ~ variable* ~ ")" }
 lambda_formals3 = { "(" ~ variable+ ~ "." ~ variable ~ ")" }
 
 // <body> --> <definition>* <sequence>
-body = { definition* ~ sequence }
+// TODO: Explain why.
+body = {
+    sequence
+  | definition+ ~ sequence*
+}
 
 // <sequence> --> <command>* <expression>
 sequence = { expression+ }
@@ -526,13 +532,14 @@ command_or_definition = _{
 // <definition> --> (define <variable> <expression>)
 //       | (define (<variable> <def formals>) <body>)
 //       | (begin <definition>*)
+// TODO: Explain why.
 definition1 = { "(" ~ "define" ~ variable ~ expression ~ ")" }
 definition2 = { "(" ~ "define" ~ "(" ~ variable ~ def_formals ~ ")" ~ body ~ ")" }
-definition3 = { "(" ~ "begin" ~ definition* ~ ")" }
+// definition3 = { "(" ~ "begin" ~ definition* ~ ")" }
 definition = {
     definition1
   | definition2
-  | definition3
+//  | definition3
 }
 
 // <def formals> --> <variable>*

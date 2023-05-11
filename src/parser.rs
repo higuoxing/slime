@@ -118,9 +118,6 @@ fn build_definition(pair: Pair<Rule>) -> Object {
                 Object::make_lambda_expression(def_formals, Object::make_begin(body)),
             )
         }
-        Rule::definition3 => {
-            todo!()
-        }
         unexpected => panic!(
             "Cannot process `{:?}` rule in `definition`! Pair: {:?}",
             unexpected, pair
@@ -405,6 +402,18 @@ fn build_lambda_expression(pair: Pair<Rule>) -> Object {
     Object::make_lambda_expression(lambda_formals, build_body(body))
 }
 
+fn build_assignment(pair: Pair<Rule>) -> Object {
+    let mut inner = pair.into_inner();
+    let variable = inner.next().expect("todo");
+    let expr = inner.next().expect("todo");
+    Object::Set(
+        variable.as_str().to_string(),
+        Rc::new(RefCell::new(build_expression(
+            expr.into_inner().next().expect("todo"),
+        ))),
+    )
+}
+
 fn build_expression(pair: Pair<Rule>) -> Object {
     match pair.as_rule() {
         Rule::literal => build_literal(pair.into_inner().next().expect("todo")),
@@ -415,6 +424,8 @@ fn build_expression(pair: Pair<Rule>) -> Object {
             build_derived_expression(pair.into_inner().next().expect("todo"))
         }
         Rule::lambda_expression => build_lambda_expression(pair),
+        Rule::definition => build_definition(pair.into_inner().next().expect("todo")),
+        Rule::assignment => build_assignment(pair),
         unexpected => panic!(
             "Cannot process `{:?}` rule in `expression`! Pair: {:?}",
             unexpected, pair
@@ -821,7 +832,7 @@ mod tests {
                 .next()
                 .unwrap()
                 .as_rule(),
-            Rule::definition1
+            Rule::definition
         );
 
         // Parse program.

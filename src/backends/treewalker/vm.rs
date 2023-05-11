@@ -12,7 +12,7 @@ fn make_begin_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 }
 
 // Construct the 'define' expression from a expr.
-fn make_define_expr(env: Rc<RefCell<Object>>, expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
+fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     // There're 3 forms of define.
     // 1) (define <variable> <expression>)
     // 2) (define (<variable> <formals>) <body>) which is equivalent to
@@ -433,10 +433,7 @@ impl Machine {
             )),
             "DEFINE" => Ok((
                 Object::Nil,
-                Some(Rc::new(RefCell::new(make_define_expr(
-                    self.env.clone(),
-                    expr,
-                )?))),
+                Some(Rc::new(RefCell::new(make_define_expr(expr)?))),
             )),
             "DEFINE-SYNTAX" => todo!(),
             "IF" => Ok((
@@ -717,13 +714,6 @@ impl Machine {
                 // Apply symbol against cdr.
                 self.eval_callable_symbol(symbol_name.as_str(), cdr)
             }
-            Object::Lambda {
-                ref formals,
-                ref body,
-            } => {
-                // Apply lambda expression against 'cdr'.
-                self.eval_lambda_expr(self.env.clone(), formals.clone(), body.clone(), cdr.clone())
-            }
             Object::Cons { .. } | Object::Conditional { .. } => {
                 // The 'car' expression maybe callable, let's evaluate it and try to apply
                 // it against 'cdr'.
@@ -737,9 +727,41 @@ impl Machine {
                     }))),
                 ))
             }
+            Object::LambdaWithEnv {
+                ref env,
+                ref lambda,
+            } => {
+                match &*lambda.clone().borrow() {
+                    Object::Lambda {
+                        ref formals,
+                        ref body,
+                    } => self.eval_lambda_expr(
+                        env.clone(),
+                        formals.clone(),
+                        body.clone(),
+                        cdr.clone(),
+                    ),
+
+                    ref o => Err(Errors::RuntimeException(format!(
+                        "Unexpected object in lambda expression '{:?}'",
+                        o
+                    ))),
+                }
+                //		self.eval_lambda_expr(env.clone(), formals, body, args)
+            }
             Object::BuiltinFunc(ref builtin_func, _) => {
                 self.eval_builtin_func(builtin_func.clone(), cdr.clone())
             }
+            Object::Lambda { .. } => Ok((
+                Object::Nil,
+                Some(Rc::new(RefCell::new(Object::Cons {
+                    car: Rc::new(RefCell::new(Object::LambdaWithEnv {
+                        env: self.env.clone(),
+                        lambda: car,
+                    })),
+                    cdr: cdr.clone(),
+                }))),
+            )),
             ref o => Err(Errors::RuntimeException(format!(
                 "Object '{:?}' is not callable",
                 o
@@ -986,15 +1008,22 @@ impl Machine {
                 ref bindings,
                 ref body,
             } => self.eval_let_expr(bindings, body.clone()),
+            Object::Lambda { .. } => Ok((
+                Object::LambdaWithEnv {
+                    env: self.env.clone(),
+                    lambda: curr_expr,
+                },
+                None,
+            )),
             // For atomic expressions, just copy them and return.
             atom @ Object::Int(_)
             | atom @ Object::Bool(_)
             | atom @ Object::Char { .. }
             | atom @ Object::String(_)
-            | atom @ Object::Lambda { .. }
             | atom @ Object::Real(_)
             | atom @ Object::BuiltinFunc(_, _)
             | atom @ Object::Nil
+            | atom @ Object::LambdaWithEnv { .. }
             | atom @ Object::Unspecified => Ok((atom.clone(), None)),
             ref o => Err(Errors::RuntimeException(format!(
                 "Unrecognized object: '{:?}'",

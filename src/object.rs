@@ -47,6 +47,10 @@ pub enum Object {
         formals: Rc<RefCell<LambdaFormal>>,
         body: Rc<RefCell<Object>>,
     },
+    LambdaWithEnv {
+        env: Rc<RefCell<Object>>,
+        lambda: Rc<RefCell<Object>>,
+    },
     Let {
         bindings: Vec<(String, Rc<RefCell<Object>>)>,
         body: Rc<RefCell<Object>>,
@@ -273,34 +277,37 @@ impl Object {
                 result_str += ")";
                 result_str
             }
-            Object::Lambda { formals, .. } => match &*formals.clone().borrow() {
-                LambdaFormal::Any(ref sym) => format!("lambda ({}..)", sym.as_str()),
-                LambdaFormal::Fixed(ref symbols) => {
-                    let mut result_str = String::from("lambda (");
+            Object::LambdaWithEnv { ref lambda, .. } => match &*lambda.clone().borrow() {
+                Object::Lambda { ref formals, .. } => match &*formals.clone().borrow() {
+                    LambdaFormal::Any(ref sym) => format!("lambda ({}..)", sym.as_str()),
+                    LambdaFormal::Fixed(ref symbols) => {
+                        let mut result_str = String::from("lambda (");
 
-                    for (sym_index, sym) in symbols.iter().enumerate() {
-                        result_str += sym.to_string().as_str();
-                        if sym_index != symbols.len() - 1 {
-                            result_str += " ";
+                        for (sym_index, sym) in symbols.iter().enumerate() {
+                            result_str += sym.to_string().as_str();
+                            if sym_index != symbols.len() - 1 {
+                                result_str += " ";
+                            }
                         }
+
+                        result_str += ")";
+                        result_str
                     }
+                    LambdaFormal::AtLeastN(ref symbols, ref last_sym) => {
+                        let mut result_str = String::from("lambda (");
 
-                    result_str += ")";
-                    result_str
-                }
-                LambdaFormal::AtLeastN(ref symbols, ref last_sym) => {
-                    let mut result_str = String::from("lambda (");
-
-                    for (sym_index, sym) in symbols.iter().enumerate() {
-                        result_str += sym.to_string().as_str();
-                        if sym_index != symbols.len() - 1 {
-                            result_str += " ";
+                        for (sym_index, sym) in symbols.iter().enumerate() {
+                            result_str += sym.to_string().as_str();
+                            if sym_index != symbols.len() - 1 {
+                                result_str += " ";
+                            }
                         }
-                    }
 
-                    result_str += format!(" {}..)", last_sym).as_str();
-                    result_str
-                }
+                        result_str += format!(" {}..)", last_sym).as_str();
+                        result_str
+                    }
+                },
+                _ => todo!(),
             },
             Object::Nil => String::from("()"),
             Object::Int(n) => format!("{}", n),
@@ -313,7 +320,7 @@ impl Object {
             Object::UnquoteSplice(ref unqspl) => {
                 format!("(unquote-splicing {})", unqspl.borrow().to_string())
             }
-            o => todo!("{:?}", o),
+            _ => todo!(),
         }
     }
 }

@@ -30,7 +30,6 @@ fn repl_loop() -> Result<(), Box<dyn Error>> {
                             object::Object::Unspecified => {
                                 println!("\n; Unspecified return value\n")
                             }
-
                             _ => println!("\n; Value: {}\n", result),
                         },
                         Err(e) => println!("{}", e),
