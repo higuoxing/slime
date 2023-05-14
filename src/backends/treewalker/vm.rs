@@ -53,7 +53,7 @@ fn make_define_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
         // Construct a lambda expression.
         let fun_name = fun_name_with_args[0].borrow().symbol_name();
         let lambda_expr = Object::Lambda {
-            formals: Rc::new(RefCell::new(LambdaFormal::Fixed(args))),
+            formals: LambdaFormal::Fixed(args),
             body: define_body[1].clone(),
         };
         Ok(Object::Define(fun_name, Rc::new(RefCell::new(lambda_expr))))
@@ -114,7 +114,7 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
     match &*lambda_body[0].clone().borrow() {
         // Any.
         Object::Symbol(ref formal) => Ok(Object::Lambda {
-            formals: Rc::new(RefCell::new(LambdaFormal::Any(formal.clone()))),
+            formals: LambdaFormal::Any(formal.clone()),
             body: Rc::new(RefCell::new(tail)),
         }),
         Object::Cons { .. } => {
@@ -140,11 +140,11 @@ fn make_lambda_expr(expr: Rc<RefCell<Object>>) -> Result<Object, Errors> {
 
             match last_symbol {
                 Some(last_sym) => Ok(Object::Lambda {
-                    formals: Rc::new(RefCell::new(LambdaFormal::AtLeastN(formals, last_sym))),
+                    formals: LambdaFormal::AtLeastN(formals, last_sym),
                     body: Rc::new(RefCell::new(tail)),
                 }),
                 None => Ok(Object::Lambda {
-                    formals: Rc::new(RefCell::new(LambdaFormal::Fixed(formals))),
+                    formals: LambdaFormal::Fixed(formals),
                     body: Rc::new(RefCell::new(tail)),
                 }),
             }
@@ -495,7 +495,7 @@ impl Machine {
     fn eval_lambda_expr(
         &mut self,
         env: Rc<RefCell<Object>>,
-        formals: Rc<RefCell<LambdaFormal>>,
+        formals: &LambdaFormal,
         body: Rc<RefCell<Object>>,
         args: Rc<RefCell<Object>>,
     ) -> Result<
@@ -505,7 +505,7 @@ impl Machine {
         ),
         Errors,
     > {
-        match &*formals.clone().borrow() {
+        match formals {
             LambdaFormal::Any(ref symbol_name) => {
                 let passed_args = Object::cons_to_vec(args.clone())?;
                 let mut tail = Object::Nil;
@@ -735,12 +735,7 @@ impl Machine {
                     Object::Lambda {
                         ref formals,
                         ref body,
-                    } => self.eval_lambda_expr(
-                        env.clone(),
-                        formals.clone(),
-                        body.clone(),
-                        cdr.clone(),
-                    ),
+                    } => self.eval_lambda_expr(env.clone(), formals, body.clone(), cdr.clone()),
 
                     ref o => Err(Errors::RuntimeException(format!(
                         "Unexpected object in lambda expression '{:?}'",

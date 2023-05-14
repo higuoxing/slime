@@ -1,11 +1,10 @@
 use crate::{
     error::Errors,
     object::{LambdaFormal, Object},
-    tokenizer::{Token, TokenKind, Tokenizer},
 };
 use pest::{iterators::Pair, Parser};
 use pest_derive::Parser;
-use std::{cell::RefCell, collections::LinkedList, fmt::format, rc::Rc};
+use std::{cell::RefCell, collections::LinkedList, rc::Rc};
 
 #[derive(Parser)]
 #[grammar = "r5rs.pest"] // relative to src
@@ -492,64 +491,6 @@ fn build_literal(pair: Pair<Rule>) -> Object {
             "Cannot process `{:?}` rule in `literal`! Pair: {:?}",
             unexpected, pair
         ),
-    }
-}
-
-fn parse_char_code(char_: &str, line: i64, column: i64) -> Result<u32, Errors> {
-    if char_.len() == 1 {
-        match char_.chars().nth(0) {
-            Some(c) => Ok(c as u32),
-            None => Err(Errors::UnexpectedToken(line, column)),
-        }
-    } else {
-        // https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
-        // Character Name          ASCII Name
-        // --------------          ----------
-        //
-        // altmode                 ESC
-        // backnext                US
-        // backspace               BS
-        // call                    SUB
-        // linefeed                LF
-        // page                    FF
-        // return                  CR
-        // rubout                  DEL
-        // space
-        // tab                     HT
-        match char_.to_uppercase().as_str() {
-            "ALTMODE" | "ESC" => Ok(27 as u32),
-            "BACKNEXT" | "US" => Ok(31 as u32),
-            "BACKSPACE" | "BS" => Ok(8 as u32),
-            "CALL" | "SUB" => Ok(26 as u32),
-            "LINEFEED" | "LF" => Ok(10 as u32),
-            "PAGE" | "FF" => Ok(12 as u32),
-            "RETURN" | "CR" => Ok(13 as u32),
-            "RUBOUT" | "DEL" => Ok(127 as u32),
-            "SPACE" | "SPC" => Ok(32 as u32),
-            "TAB" | "HT" => Ok(9 as u32),
-            // FIXME: Let's add more???
-            _ => Err(Errors::UnexpectedToken(line, column)),
-        }
-    }
-}
-
-fn parse_bucky_bits(bucky_bit: &str, line: i64, column: i64) -> Result<u32, Errors> {
-    // https://groups.csail.mit.edu/mac/ftpdir/scheme-7.4/doc-html/scheme_6.html
-    // Key             Bucky bit prefix        Bucky bit
-    // ---             ----------------        ---------
-    //
-    // Meta            M- or Meta-                 1
-    // Control         C- or Control-              2
-    // Super           S- or Super-                4
-    // Hyper           H- or Hyper-                8
-    // Top             T- or Top-                 16
-    match bucky_bit.to_uppercase().as_str() {
-        "META" | "M" => Ok(1 as u32),
-        "CONTROL" | "C" => Ok(2 as u32),
-        "SUPER" | "S" => Ok(4 as u32),
-        "HYPER" | "H" => Ok(8 as u32),
-        "TOP" | "T" => Ok(16 as u32),
-        _ => Err(Errors::UnexpectedToken(line, column)),
     }
 }
 

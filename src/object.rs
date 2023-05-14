@@ -1,7 +1,7 @@
 use crate::{builtins::BuiltinFuncSig, error::Errors};
-use std::{cell::RefCell, collections::HashMap, default::Default, fmt, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt, rc::Rc};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LambdaFormal {
     // Any number of arguments.
     Any(String),
@@ -44,7 +44,7 @@ pub enum Object {
     Define(String, Rc<RefCell<Object>>),
     Set(String, Rc<RefCell<Object>>),
     Lambda {
-        formals: Rc<RefCell<LambdaFormal>>,
+        formals: LambdaFormal,
         body: Rc<RefCell<Object>>,
     },
     LambdaWithEnv {
@@ -128,7 +128,7 @@ impl Object {
 
     pub fn make_lambda_expression(formals: LambdaFormal, body: Object) -> Object {
         Object::Lambda {
-            formals: Rc::new(RefCell::new(formals)),
+            formals,
             body: Rc::new(RefCell::new(body)),
         }
     }
@@ -278,7 +278,7 @@ impl Object {
                 result_str
             }
             Object::LambdaWithEnv { ref lambda, .. } => match &*lambda.clone().borrow() {
-                Object::Lambda { ref formals, .. } => match &*formals.clone().borrow() {
+                Object::Lambda { ref formals, .. } => match formals {
                     LambdaFormal::Any(ref sym) => format!("lambda ({}..)", sym.as_str()),
                     LambdaFormal::Fixed(ref symbols) => {
                         let mut result_str = String::from("lambda (");
