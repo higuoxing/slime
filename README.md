@@ -1,13 +1,13 @@
-# lambda-scheme
+# Slime
 
-[![Build and test.](https://github.com/higuoxing/lambda-scheme/actions/workflows/rust.yml/badge.svg)](https://github.com/higuoxing/lambda-scheme/actions/workflows/rust.yml)
+[![Build and test.](https://github.com/higuoxing/slime/actions/workflows/rust.yml/badge.svg)](https://github.com/higuoxing/slime/actions/workflows/rust.yml)
 
 This is a simple implementation of a Scheme interpreter written in Rust. The interpreter supports a subset of the Scheme language, including basic arithmetic, boolean operations, conditionals, and function definition and application.
 
 ## Build
 
 ```bash
-git clone https://github.com/higuoxing/lambda-scheme.git
+git clone https://github.com/higuoxing/slime.git
 cargo build --release
 ```
 
@@ -16,7 +16,7 @@ cargo build --release
 To start the interpreter, simply run:
 
 ```bash
-target/release/lsi
+target/release/sli
 ```
 
 This will start a REPL (Read-Eval-Print Loop) where you can enter Scheme expressions and see their evaluation results. For example:

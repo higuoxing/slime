@@ -1,5 +1,5 @@
 [package]
-name = "lambda"
+name = "slime"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,4 +9,3 @@ thiserror = "1.0.39" ## Error handling.
 clap      = { version = "4.2.0", features = ["derive"] } ## Commandline argument parser.
 pest      = "2.0"
 pest_derive = "2.0"
-inkwell   = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm15-0"] }

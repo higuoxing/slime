@@ -1,8 +1,8 @@
 use std::{error::Error, fs, path::Path};
 
 use clap::Parser;
-use lambda::{backends::treewalker::vm, error::Errors, object, parser};
 use rustyline::{error::ReadlineError, DefaultEditor};
+use slime::{backends::treewalker::vm, error::Errors, object, parser};
 
 #[derive(Parser)]
 struct Cli {
